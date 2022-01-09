@@ -1,6 +1,6 @@
 package storage
 
-type UrlStorer interface {
+type URLStorer interface {
 	Set(string, string)
 	Get(string) (string, error)
 }

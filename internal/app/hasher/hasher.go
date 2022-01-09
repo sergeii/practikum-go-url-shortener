@@ -1,5 +1,5 @@
 package hasher
 
-type UrlHasher interface {
-	HashUrl(string) string
+type URLHasher interface {
+	HashURL(string) string
 }

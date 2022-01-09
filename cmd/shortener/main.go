@@ -10,12 +10,12 @@ import (
 	"github.com/sergeii/practikum-go-url-shortener/internal/app/storage"
 )
 
-type UrlShortenerHandler struct {
-	storage storage.UrlStorer
-	hasher  hasher.UrlHasher
+type URLShortenerHandler struct {
+	storage storage.URLStorer
+	hasher  hasher.URLHasher
 }
 
-func (handler UrlShortenerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (handler URLShortenerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	// Пытаемся принять длинный url и превратить его в короткий
 	case "POST":
@@ -28,49 +28,49 @@ func (handler UrlShortenerHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 	}
 }
 
-func (handler UrlShortenerHandler) Shorten(w http.ResponseWriter, r *http.Request) {
+func (handler URLShortenerHandler) Shorten(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	// Пытаемся получить длинный url из тела запроса
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	longUrl := string(body)
-	if longUrl == "" {
+	longURL := string(body)
+	if longURL == "" {
 		http.Error(w, "Please provide a url to shorten", 400)
 		return
 	}
 	// Получаем короткий идентификатор для ссылки и кладем пару в хранилище
-	shortUrlId := handler.hasher.HashUrl(longUrl)
-	handler.storage.Set(shortUrlId, longUrl)
+	shortURLID := handler.hasher.HashURL(longURL)
+	handler.storage.Set(shortURLID, longURL)
 	// Возвращаем короткую ссылку с учетом хоста, на котором запущен сервис
-	shortUrl := "http://" + r.Host + "/" + shortUrlId
+	shortURL := "http://" + r.Host + "/" + shortURLID
 	w.WriteHeader(http.StatusCreated)
-	w.Write([]byte(shortUrl))
+	w.Write([]byte(shortURL))
 }
 
-func (handler UrlShortenerHandler) Expand(w http.ResponseWriter, r *http.Request) {
+func (handler URLShortenerHandler) Expand(w http.ResponseWriter, r *http.Request) {
 	// Пытаемся получить id короткой ссылки из пути
 	// и найти по нему длинную ссылку, которую затем возвращаем в виде 307 редиректа
-	shortUrlId := strings.Trim(r.URL.Path, "/")
-	if shortUrlId == "" {
+	shortURLID := strings.Trim(r.URL.Path, "/")
+	if shortURLID == "" {
 		http.Error(w, "Invalid short url", 400)
 		return
 	}
-	longUrl, err := handler.storage.Get(shortUrlId)
+	longURL, err := handler.storage.Get(shortURLID)
 	if err != nil {
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	http.Redirect(w, r, longUrl, http.StatusTemporaryRedirect)
+	http.Redirect(w, r, longURL, http.StatusTemporaryRedirect)
 }
 
 func main() {
 	server := &http.Server{
 		Addr: "localhost:8080",
-		Handler: &UrlShortenerHandler{
-			storage: storage.NewLocmemUrlShortenerBackend(),
-			hasher:  &hasher.SimpleUrlHasher{},
+		Handler: &URLShortenerHandler{
+			storage: storage.NewLocmemURLShortenerBackend(),
+			hasher:  &hasher.SimpleURLHasher{},
 		},
 	}
 	log.Fatal(server.ListenAndServe())
