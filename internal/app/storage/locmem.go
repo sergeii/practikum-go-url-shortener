@@ -3,24 +3,22 @@ package storage
 import "errors"
 
 type LocmemURLStorerBackend struct {
-	cache map[string]string
+	Storage map[string]string
 }
 
-func NewLocmemURLShortenerBackend() *LocmemURLStorerBackend {
-	storage := map[string]string{
-		"go": "https://go.dev/", // Для тестирования
-	}
+func NewLocmemURLStorerBackend() *LocmemURLStorerBackend {
+	storage := make(map[string]string)
 	return &LocmemURLStorerBackend{
-		cache: storage,
+		Storage: storage,
 	}
 }
 
 func (backend LocmemURLStorerBackend) Set(shortURLID, longURL string) {
-	backend.cache[shortURLID] = longURL
+	backend.Storage[shortURLID] = longURL
 }
 
 func (backend LocmemURLStorerBackend) Get(shortURLID string) (string, error) {
-	longURL, found := backend.cache[shortURLID]
+	longURL, found := backend.Storage[shortURLID]
 	if !found {
 		return "", errors.New("url not found")
 	}
