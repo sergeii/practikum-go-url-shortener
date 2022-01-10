@@ -27,7 +27,6 @@ func doTestRequest(t *testing.T, ts *httptest.Server, method, path string, body 
 		},
 	}
 	resp, err := client.Do(req)
-	defer resp.Body.Close()
 	require.NoError(t, err)
 
 	respBody, err := ioutil.ReadAll(resp.Body)
@@ -53,12 +52,14 @@ func TestShortenAndExpandAnyLengthURLs(t *testing.T) {
 
 	for _, TestURL := range TestURLs {
 		resp, body := doTestRequest(t, ts, http.MethodPost, "/", strings.NewReader(TestURL))
+		resp.Body.Close()
 		assert.Equal(t, 201, resp.StatusCode)
 
 		// Получаем относительный url, состоящий из 7 символов, и пробуем перейти по нему
 		parsed, _ := url.Parse(body)
 		assert.Len(t, strings.Trim(parsed.Path, "/"), 7)
 		resp, _ = doTestRequest(t, ts, http.MethodGet, parsed.Path, nil)
+		resp.Body.Close()
 		// Получем ожидаем редирект на оригинальный url
 		assert.Equal(t, 307, resp.StatusCode)
 		assert.Equal(t, TestURL, resp.Header.Get("Location"))
@@ -95,6 +96,7 @@ func TestUnsupportedHTTPMethods(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.method, func(t *testing.T) {
 			resp, _ := doTestRequest(t, ts, tt.method, "/", strings.NewReader("https://example.com/"))
+			resp.Body.Close()
 			assert.Equal(t, tt.wantCode, resp.StatusCode)
 		})
 	}
@@ -134,6 +136,7 @@ func TestShortenEndpointRequiresURL(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			resp, _ := doTestRequest(t, ts, http.MethodPost, "/", tt.body)
+			resp.Body.Close()
 			if tt.isErr {
 				assert.Equal(t, 400, resp.StatusCode)
 			} else {
@@ -191,6 +194,7 @@ func TestExpandEndpointRequiresProperID(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			resp, _ := doTestRequest(t, ts, http.MethodGet, tt.req, nil)
+			resp.Body.Close()
 			if tt.isErr {
 				assert.Equal(t, 404, resp.StatusCode)
 			} else {
