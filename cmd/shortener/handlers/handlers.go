@@ -3,8 +3,8 @@ package handlers
 import (
 	"io"
 	"net/http"
-	"strings"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/sergeii/practikum-go-url-shortener/internal/app/hasher"
 	"github.com/sergeii/practikum-go-url-shortener/internal/app/storage"
 )
@@ -14,21 +14,9 @@ type URLShortenerHandler struct {
 	Hasher  hasher.URLHasher
 }
 
-func (handler URLShortenerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	// Пытаемся принять длинный url и превратить его в короткий
-	case "POST":
-		handler.Shorten(w, r)
-	// Пытаемся принять короткий url и вернуть оригинальный длинный
-	case "GET":
-		handler.Expand(w, r)
-	default:
-		http.Error(w, "Invalid request method", 400)
-	}
-}
-
-func (handler URLShortenerHandler) Shorten(w http.ResponseWriter, r *http.Request) {
+func (handler URLShortenerHandler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
+	defer r.Body.Close()
 	// Пытаемся получить длинный url из тела запроса
 	if err != nil {
 		http.Error(w, err.Error(), 500)
@@ -48,10 +36,10 @@ func (handler URLShortenerHandler) Shorten(w http.ResponseWriter, r *http.Reques
 	w.Write([]byte(shortURL))
 }
 
-func (handler URLShortenerHandler) Expand(w http.ResponseWriter, r *http.Request) {
+func (handler URLShortenerHandler) ExpandURL(w http.ResponseWriter, r *http.Request) {
 	// Пытаемся получить id короткой ссылки из пути
 	// и найти по нему длинную ссылку, которую затем возвращаем в виде 307 редиректа
-	shortURLID := strings.Trim(r.URL.Path, "/")
+	shortURLID := chi.URLParam(r, "slug")
 	if shortURLID == "" {
 		http.Error(w, "Invalid short url", 400)
 		return
