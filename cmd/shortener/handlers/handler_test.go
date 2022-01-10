@@ -46,6 +46,7 @@ func TestShortenAndExpandAnyLengthURLs(t *testing.T) {
 
 		handler.ServeHTTP(writer, request)
 		result = writer.Result()
+		result.Body.Close()
 		// Получем ожидаем редирект на оригинальный url
 		assert.Equal(t, 307, result.StatusCode)
 		assert.Equal(t, TestURL, result.Header.Get("Location"))
@@ -63,6 +64,7 @@ func TestUnsupportedHTTPMethods(t *testing.T) {
 		writer := httptest.NewRecorder()
 		handler.ServeHTTP(writer, request)
 		result := writer.Result()
+		result.Body.Close()
 		assert.Equal(t, 400, result.StatusCode)
 	}
 }
@@ -99,6 +101,7 @@ func TestShortenEndpointRequiresURL(t *testing.T) {
 			writer := httptest.NewRecorder()
 			handler.ServeHTTP(writer, request)
 			result := writer.Result()
+			result.Body.Close()
 			if tt.isErr {
 				assert.Equal(t, 400, result.StatusCode)
 			} else {
@@ -154,6 +157,7 @@ func TestExpandEndpointRequiresProperID(t *testing.T) {
 			writer := httptest.NewRecorder()
 			handler.ServeHTTP(writer, request)
 			result := writer.Result()
+			result.Body.Close()
 			if tt.isErr {
 				assert.Equal(t, 400, result.StatusCode)
 			} else {
@@ -184,6 +188,7 @@ func TestExpandEndpointHandlesExtraSlashes(t *testing.T) {
 		writer := httptest.NewRecorder()
 		handler.ServeHTTP(writer, request)
 		result := writer.Result()
+		result.Body.Close()
 		assert.Equal(t, 307, result.StatusCode)
 		assert.Equal(t, "https://go.dev/", result.Header.Get("Location"))
 	}
