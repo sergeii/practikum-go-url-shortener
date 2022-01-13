@@ -44,7 +44,7 @@ func TestShortenAndExpandAnyLengthURLs(t *testing.T) {
 
 	handler := &handlers.URLShortenerHandler{
 		Storage: storage.NewLocmemURLStorerBackend(),
-		Hasher:  &hasher.SimpleURLHasher{},
+		Hasher:  hasher.NewSimpleURLHasher(),
 	}
 	router := NewRouter(handler)
 	ts := httptest.NewServer(router)
@@ -87,7 +87,7 @@ func TestUnsupportedHTTPMethods(t *testing.T) {
 
 	handler := &handlers.URLShortenerHandler{
 		Storage: storage.NewLocmemURLStorerBackend(),
-		Hasher:  &hasher.SimpleURLHasher{},
+		Hasher:  hasher.NewSimpleURLHasher(),
 	}
 	router := NewRouter(handler)
 	ts := httptest.NewServer(router)
@@ -119,7 +119,7 @@ func TestShortenEndpointRequiresURL(t *testing.T) {
 			isErr: true,
 		},
 		{
-			name:  "no empty provided",
+			name:  "no body provided",
 			body:  nil,
 			isErr: true,
 		},
@@ -127,7 +127,7 @@ func TestShortenEndpointRequiresURL(t *testing.T) {
 
 	handler := &handlers.URLShortenerHandler{
 		Storage: storage.NewLocmemURLStorerBackend(),
-		Hasher:  &hasher.SimpleURLHasher{},
+		Hasher:  hasher.NewSimpleURLHasher(),
 	}
 	router := NewRouter(handler)
 	ts := httptest.NewServer(router)
@@ -173,7 +173,7 @@ func TestExpandEndpointRequiresProperID(t *testing.T) {
 		},
 		{
 			name:   "unknown short url",
-			req:    "/foobar/",
+			req:    "/foobar",
 			isErr:  true,
 			result: "",
 		},
@@ -185,7 +185,7 @@ func TestExpandEndpointRequiresProperID(t *testing.T) {
 				"gogogo": "https://go.dev/",
 			},
 		},
-		Hasher: &hasher.SimpleURLHasher{},
+		Hasher: hasher.NewSimpleURLHasher(),
 	}
 	router := NewRouter(handler)
 	ts := httptest.NewServer(router)

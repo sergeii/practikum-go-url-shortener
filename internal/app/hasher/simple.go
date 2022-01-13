@@ -11,6 +11,10 @@ type SimpleURLHasher struct {
 
 var defaultLength = 7
 
+func NewSimpleURLHasher() *SimpleURLHasher {
+	return &SimpleURLHasher{}
+}
+
 func (hasher SimpleURLHasher) HashURL(longURL string) string {
 	algo := sha256.New()
 	algo.Write([]byte(longURL))
