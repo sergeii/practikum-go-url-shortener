@@ -18,7 +18,7 @@ func (backend LocmemURLStorerBackend) Set(shortURLID, longURL string) {
 func (backend LocmemURLStorerBackend) Get(shortURLID string) (string, error) {
 	longURL, found := backend.Storage[shortURLID]
 	if !found {
-		return "", URLNotFound
+		return "", ErrURLNotFound
 	}
 	return longURL, nil
 }

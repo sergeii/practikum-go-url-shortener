@@ -16,6 +16,11 @@ type URLShortenerHandler struct {
 }
 
 func (handler URLShortenerHandler) ShortenURL(w http.ResponseWriter, r *http.Request) {
+	// Принимает на вход произвольный URL в теле запроса и создает для него "короткую" версию,
+	// при переходе по которой пользователь попадет на оригинальный "длинный" URL
+	// В случае успеха возвращает код 201 и готовую короткую ссылку в теле ответа
+	// В случае отстуствия валидного URL в теле запроса вернет ошибку 400
+
 	body, err := io.ReadAll(r.Body)
 	defer r.Body.Close()
 	// Пытаемся получить длинный url из тела запроса
@@ -42,6 +47,10 @@ func (handler URLShortenerHandler) ShortenURL(w http.ResponseWriter, r *http.Req
 }
 
 func (handler URLShortenerHandler) ExpandURL(w http.ResponseWriter, r *http.Request) {
+	// Перенаправляет пользователя, перешедшего по короткой ссылке, на оригинальный "длинный" URL.
+	// В случае успеха возвращает код 307 с редиректом на оригинальный URL
+	// В случае неизвестной сервису короткой ссылки возвращает ошибку 404
+
 	// Пытаемся получить id короткой ссылки из пути
 	// и найти по нему длинную ссылку, которую затем возвращаем в виде 307 редиректа
 	shortURLID := chi.URLParam(r, "slug")
@@ -51,7 +60,7 @@ func (handler URLShortenerHandler) ExpandURL(w http.ResponseWriter, r *http.Requ
 	}
 	longURL, err := handler.Storage.Get(shortURLID)
 	if err != nil {
-		if err == storage.URLNotFound {
+		if err == storage.ErrURLNotFound {
 			// Короткая ссылка не найдена в хранилище - ожидаемое поведение, возвращаем 404
 			http.Error(w, err.Error(), http.StatusNotFound)
 		} else {
