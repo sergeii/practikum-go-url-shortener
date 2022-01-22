@@ -19,7 +19,7 @@ type URLShortenerHandler struct {
 
 func (handler URLShortenerHandler) ShortenURLHelper(longURL string, r *http.Request) (url.URL, error) {
 	if longURL == "" {
-		return url.URL{}, errors.New("Please provide a url to shorten")
+		return url.URL{}, errors.New("please provide a url to shorten")
 	}
 	// Получаем короткий идентификатор для ссылки и кладем пару в хранилище
 	shortURLID := handler.Hasher.HashURL(longURL)
@@ -80,7 +80,7 @@ func (handler URLShortenerHandler) ExpandURL(w http.ResponseWriter, r *http.Requ
 }
 
 type APIShortenRequest struct {
-	Url string `json:"url"` // Оригинальный длинный URL, требующий укорачивания
+	URL string `json:"url"` // Оригинальный длинный URL, требующий укорачивания
 }
 
 type APIShortenResult struct {
@@ -97,7 +97,7 @@ func (handler URLShortenerHandler) APIShortenURL(w http.ResponseWriter, r *http.
 		return
 	}
 
-	shortURL, err := handler.ShortenURLHelper(shortenReq.Url, r)
+	shortURL, err := handler.ShortenURLHelper(shortenReq.URL, r)
 	// Значение параметра невалидно
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
