@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -15,6 +17,22 @@ type URLShortenerHandler struct {
 	Hasher  hasher.URLHasher
 }
 
+func (handler URLShortenerHandler) ShortenURLHelper(longURL string, r *http.Request) (url.URL, error) {
+	if longURL == "" {
+		return url.URL{}, errors.New("Please provide a url to shorten")
+	}
+	// Получаем короткий идентификатор для ссылки и кладем пару в хранилище
+	shortURLID := handler.Hasher.HashURL(longURL)
+	handler.Storage.Set(shortURLID, longURL)
+	// Возвращаем короткую ссылку с учетом хоста, на котором запущен сервис
+	shortURL := url.URL{
+		Scheme: "http",
+		Host:   r.Host,
+		Path:   shortURLID,
+	}
+	return shortURL, nil
+}
+
 // ShortenURL принимает на вход произвольный URL в теле запроса и создает для него "короткую" версию,
 // при переходе по которой пользователь попадет на оригинальный "длинный" URL
 // В случае успеха возвращает код 201 и готовую короткую ссылку в теле ответа
@@ -27,19 +45,10 @@ func (handler URLShortenerHandler) ShortenURL(w http.ResponseWriter, r *http.Req
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	longURL := string(body)
-	if longURL == "" {
-		http.Error(w, "Please provide a url to shorten", http.StatusBadRequest)
+	shortURL, err := handler.ShortenURLHelper(string(body), r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
-	}
-	// Получаем короткий идентификатор для ссылки и кладем пару в хранилище
-	shortURLID := handler.Hasher.HashURL(longURL)
-	handler.Storage.Set(shortURLID, longURL)
-	// Возвращаем короткую ссылку с учетом хоста, на котором запущен сервис
-	shortURL := url.URL{
-		Scheme: "http",
-		Host:   r.Host,
-		Path:   shortURLID,
 	}
 	w.WriteHeader(http.StatusCreated)
 	w.Write([]byte(shortURL.String()))
@@ -68,4 +77,40 @@ func (handler URLShortenerHandler) ExpandURL(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	http.Redirect(w, r, longURL, http.StatusTemporaryRedirect)
+}
+
+type APIShortenRequest struct {
+	Url string `json:"url"` // Оригинальный длинный URL, требующий укорачивания
+}
+
+type APIShortenResult struct {
+	Result string `json:"result"` // Короткий URL, превращенный из длинного
+}
+
+func (handler URLShortenerHandler) APIShortenURL(w http.ResponseWriter, r *http.Request) {
+	var shortenReq APIShortenRequest
+
+	defer r.Body.Close()
+	// Получили невалидный json
+	if err := json.NewDecoder(r.Body).Decode(&shortenReq); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	shortURL, err := handler.ShortenURLHelper(shortenReq.Url, r)
+	// Значение параметра невалидно
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	respBody, err := json.Marshal(&APIShortenResult{Result: shortURL.String()})
+	// Не удалось серилизовать json по некой очень редкой проблеме
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	w.Write(respBody)
 }

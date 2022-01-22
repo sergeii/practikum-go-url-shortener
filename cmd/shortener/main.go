@@ -67,8 +67,11 @@ func NewRouter(handler *handlers.URLShortenerHandler) chi.Router {
 	router.Use(middleware.Logger)
 	router.Use(middleware.Recoverer)
 	router.Route("/", func(r chi.Router) {
-		router.Post("/", handler.ShortenURL)
-		router.Get("/{slug:[a-z0-9]+}", handler.ExpandURL)
+		r.Post("/", handler.ShortenURL)
+		r.Get("/{slug:[a-z0-9]+}", handler.ExpandURL)
+	})
+	router.Route("/api", func(r chi.Router) {
+		r.Post("/shorten", handler.APIShortenURL)
 	})
 	return router
 }
