@@ -19,9 +19,9 @@ type URLShortenerHandler struct {
 	BaseURL url.URL
 }
 
-func (handler URLShortenerHandler) ShortenURLHelper(longURL string, r *http.Request) (url.URL, error) {
+func (handler URLShortenerHandler) ShortenURLHelper(longURL string, r *http.Request) (*url.URL, error) {
 	if longURL == "" {
-		return url.URL{}, errors.New("please provide a url to shorten")
+		return nil, errors.New("please provide a url to shorten")
 	}
 	// Получаем короткий идентификатор для ссылки и кладем пару в хранилище
 	shortURLID := handler.Hasher.HashURL(longURL)
@@ -36,12 +36,11 @@ func (handler URLShortenerHandler) ShortenURLHelper(longURL string, r *http.Requ
 		baseURLHost = r.Host
 	}
 	shortURLPath := strings.TrimRight(handler.BaseURL.Path, "/") + "/" + shortURLID
-	shortURL := url.URL{
+	return &url.URL{
 		Scheme: baseURLScheme,
 		Host:   baseURLHost,
 		Path:   shortURLPath,
-	}
-	return shortURL, nil
+	}, nil
 }
 
 // ShortenURL принимает на вход произвольный URL в теле запроса и создает для него "короткую" версию,
@@ -78,7 +77,7 @@ func (handler URLShortenerHandler) ExpandURL(w http.ResponseWriter, r *http.Requ
 	}
 	longURL, err := handler.Storage.Get(shortURLID)
 	if err != nil {
-		if err == storage.ErrURLNotFound {
+		if errors.Is(err, storage.ErrURLNotFound) {
 			// Короткая ссылка не найдена в хранилище - ожидаемое поведение, возвращаем 404
 			http.Error(w, err.Error(), http.StatusNotFound)
 		} else {

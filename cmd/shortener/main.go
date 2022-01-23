@@ -22,6 +22,7 @@ type Config struct {
 	BaseURL               url.URL       `env:"BASE_URL"`
 	ServerAddress         string        `env:"SERVER_ADDRESS" envDefault:"localhost:8080"`
 	ServerShutdownTimeout time.Duration `env:"SERVER_SHUTDOWN_TIMEOUT" envDefault:"5s"`
+	FileStoragePath       string        `env:"FILE_STORAGE_PATH"`
 }
 
 func main() {
@@ -33,8 +34,19 @@ func main() {
 		return
 	}
 
+	URLStorage, err := configureStorage(&cfg)
+	if err != nil {
+		log.Fatalf("unable to init and configure storage due to %s\n", err)
+		return
+	}
+	defer func() {
+		if err := URLStorage.Close(); err != nil {
+			log.Fatalf("failed to close storage %s due to %s; possible data loss\n", URLStorage, err)
+		}
+	}()
+
 	handler := &handlers.URLShortenerHandler{
-		Storage: storage.NewLocmemURLStorerBackend(),
+		Storage: URLStorage,
 		Hasher:  hasher.NewSimpleURLHasher(),
 		BaseURL: cfg.BaseURL,
 	}
@@ -64,13 +76,21 @@ func startStopServer(server *http.Server, cfg *Config) {
 	log.Print("Stopping the server...")
 
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.ServerShutdownTimeout)
-	defer func() {
-		cancel()
-	}()
+	defer cancel()
+
 	if err := server.Shutdown(ctx); err != nil {
 		log.Fatalf("Server shutdown failed due to: %s\n", err)
 	}
 	log.Print("Stopped the server successfully")
+}
+
+// configureStorage инициализирует тип хранилища
+// в зависимости от настроек сервиса, заданных переменными окружения
+func configureStorage(cfg *Config) (storage.URLStorer, error) {
+	if cfg.FileStoragePath != "" {
+		return storage.NewFileURLStorerBackend(cfg.FileStoragePath)
+	}
+	return storage.NewLocmemURLStorerBackend(), nil
 }
 
 func NewRouter(handler *handlers.URLShortenerHandler) chi.Router {

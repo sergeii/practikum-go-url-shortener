@@ -22,3 +22,8 @@ func (backend LocmemURLStorerBackend) Get(shortURLID string) (string, error) {
 	}
 	return longURL, nil
 }
+
+func (backend LocmemURLStorerBackend) Close() error {
+	// do nothing
+	return nil
+}
