@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/sergeii/practikum-go-url-shortener/internal/app/hasher"
@@ -15,6 +16,7 @@ import (
 type URLShortenerHandler struct {
 	Storage storage.URLStorer
 	Hasher  hasher.URLHasher
+	BaseURL url.URL
 }
 
 func (handler URLShortenerHandler) ShortenURLHelper(longURL string, r *http.Request) (url.URL, error) {
@@ -24,11 +26,20 @@ func (handler URLShortenerHandler) ShortenURLHelper(longURL string, r *http.Requ
 	// Получаем короткий идентификатор для ссылки и кладем пару в хранилище
 	shortURLID := handler.Hasher.HashURL(longURL)
 	handler.Storage.Set(shortURLID, longURL)
-	// Возвращаем короткую ссылку с учетом хоста, на котором запущен сервис
+	// Мы возвращаем короткую ссылку используя настройки базового URL сервиса
+	// В случае его отстуствия используем имя хоста, с которым был совершен запрос
+	baseURLScheme, baseURLHost := handler.BaseURL.Scheme, handler.BaseURL.Host
+	if baseURLScheme == "" {
+		baseURLScheme = "http"
+	}
+	if baseURLHost == "" {
+		baseURLHost = r.Host
+	}
+	shortURLPath := strings.TrimRight(handler.BaseURL.Path, "/") + "/" + shortURLID
 	shortURL := url.URL{
-		Scheme: "http",
-		Host:   r.Host,
-		Path:   shortURLID,
+		Scheme: baseURLScheme,
+		Host:   baseURLHost,
+		Path:   shortURLPath,
 	}
 	return shortURL, nil
 }

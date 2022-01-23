@@ -148,6 +148,62 @@ func TestShortenEndpointRequiresURL(t *testing.T) {
 	}
 }
 
+func TestShortenEndpointSupportsCustomizableBaseURL(t *testing.T) {
+	tests := []struct {
+		name      string
+		configURL string
+		want      string
+	}{
+		{
+			name:      "http scheme",
+			configURL: "http://example.com",
+			want:      "http://example.com/",
+		},
+		{
+			name:      "localhost with port",
+			configURL: "http://localhost:8080",
+			want:      "http://localhost:8080/",
+		},
+		{
+			name:      "https scheme",
+			configURL: "https://example.com",
+			want:      "https://example.com/",
+		},
+		{
+			name:      "leading slash included",
+			configURL: "https://example.com/",
+			want:      "https://example.com/",
+		},
+		{
+			name:      "custom path",
+			configURL: "https://example.com/link",
+			want:      "https://example.com/link/",
+		},
+		{
+			name:      "custom path with leading slash",
+			configURL: "https://example.com/link/",
+			want:      "https://example.com/link/",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			baseURL, _ := url.Parse(tt.configURL)
+			handler := &handlers.URLShortenerHandler{
+				Storage: storage.NewLocmemURLStorerBackend(),
+				Hasher:  hasher.NewSimpleURLHasher(),
+				BaseURL: *baseURL,
+			}
+			router := NewRouter(handler)
+			ts := httptest.NewServer(router)
+			defer ts.Close()
+
+			resp, body := doTestRequest(t, ts, http.MethodPost, "/", strings.NewReader("https://ya.ru/"))
+			resp.Body.Close()
+			assert.Equal(t, tt.want, body[:len(body)-7])
+		})
+	}
+}
+
 func TestAPIShortenAndExpandURLs(t *testing.T) {
 	TestURLs := []string{
 		"https://ya.ru",

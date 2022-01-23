@@ -4,11 +4,13 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/caarlos0/env/v6"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/sergeii/practikum-go-url-shortener/cmd/shortener/handlers"
@@ -16,27 +18,38 @@ import (
 	"github.com/sergeii/practikum-go-url-shortener/internal/app/storage"
 )
 
-const (
-	shutdownDur = 5000 * time.Millisecond
-)
-
 type Config struct {
-	ShutdownTimeout time.Duration
+	BaseURL               url.URL       `env:"BASE_URL"`
+	ServerAddress         string        `env:"SERVER_ADDRESS" envDefault:"localhost:8080"`
+	ServerShutdownTimeout time.Duration `env:"SERVER_SHUTDOWN_TIMEOUT" envDefault:"5s"`
 }
 
 func main() {
+	var cfg Config
+
+	// Парсим настройки сервиса, используя переменные окружения
+	if err := env.Parse(&cfg); err != nil {
+		log.Fatal(err)
+		return
+	}
+
 	handler := &handlers.URLShortenerHandler{
 		Storage: storage.NewLocmemURLStorerBackend(),
 		Hasher:  hasher.NewSimpleURLHasher(),
+		BaseURL: cfg.BaseURL,
 	}
 	router := NewRouter(handler)
 
-	cfg := Config{ShutdownTimeout: shutdownDur}
 	server := &http.Server{
-		Addr:    "localhost:8080",
+		Addr:    cfg.ServerAddress,
 		Handler: router,
 	}
 
+	// Запускаем сервер и при необходимости останавливаем его gracefully
+	startStopServer(server, &cfg)
+}
+
+func startStopServer(server *http.Server, cfg *Config) {
 	sigint := make(chan os.Signal, 1)
 	signal.Notify(sigint, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 
@@ -50,7 +63,7 @@ func main() {
 	<-sigint
 	log.Print("Stopping the server...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.ServerShutdownTimeout)
 	defer func() {
 		cancel()
 	}()
