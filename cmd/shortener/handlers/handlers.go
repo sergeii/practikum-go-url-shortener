@@ -16,7 +16,7 @@ import (
 type URLShortenerHandler struct {
 	Storage storage.URLStorer
 	Hasher  hasher.URLHasher
-	BaseURL url.URL
+	BaseURL *url.URL
 }
 
 func (handler URLShortenerHandler) ShortenURLHelper(longURL string, r *http.Request) (*url.URL, error) {
@@ -28,14 +28,19 @@ func (handler URLShortenerHandler) ShortenURLHelper(longURL string, r *http.Requ
 	handler.Storage.Set(shortURLID, longURL)
 	// Мы возвращаем короткую ссылку используя настройки базового URL сервиса
 	// В случае его отстуствия используем имя хоста, с которым был совершен запрос
-	baseURLScheme, baseURLHost := handler.BaseURL.Scheme, handler.BaseURL.Host
-	if baseURLScheme == "" {
-		baseURLScheme = "http"
+	baseURLScheme, baseURLHost, baseURLPath := "http", r.Host, "/"
+	if handler.BaseURL != nil {
+		if handler.BaseURL.Scheme != "" {
+			baseURLScheme = handler.BaseURL.Scheme
+		}
+		if handler.BaseURL.Host != "" {
+			baseURLHost = handler.BaseURL.Host
+		}
+		if handler.BaseURL.Path != "" {
+			baseURLPath = handler.BaseURL.Path
+		}
 	}
-	if baseURLHost == "" {
-		baseURLHost = r.Host
-	}
-	shortURLPath := strings.TrimRight(handler.BaseURL.Path, "/") + "/" + shortURLID
+	shortURLPath := strings.TrimRight(baseURLPath, "/") + "/" + shortURLID
 	return &url.URL{
 		Scheme: baseURLScheme,
 		Host:   baseURLHost,
@@ -97,6 +102,10 @@ type APIShortenResult struct {
 	Result string `json:"result"` // Короткий URL, превращенный из длинного
 }
 
+// APIShortenURL по аналогии с ShortenURL принимает на вход произвольный URL и создает для него короткую ссылку.
+// Эндпоинт принимает ссылку в виде json, URL в котором указывается ключем "url"
+// В случае успеха возвращает код 201 и готовую короткую ссылку в теле ответа, так же в виде json.
+// В случае отстуствия валидного URL в теле запроса вернет ошибку 400
 func (handler URLShortenerHandler) APIShortenURL(w http.ResponseWriter, r *http.Request) {
 	var shortenReq APIShortenRequest
 

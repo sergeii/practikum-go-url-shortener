@@ -191,7 +191,7 @@ func TestShortenEndpointSupportsCustomizableBaseURL(t *testing.T) {
 			handler := &handlers.URLShortenerHandler{
 				Storage: storage.NewLocmemURLStorerBackend(),
 				Hasher:  hasher.NewSimpleURLHasher(),
-				BaseURL: *baseURL,
+				BaseURL: baseURL,
 			}
 			router := NewRouter(handler)
 			ts := httptest.NewServer(router)

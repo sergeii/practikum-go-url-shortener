@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"log"
 	"net/http"
 	"net/url"
@@ -19,22 +20,33 @@ import (
 )
 
 type Config struct {
-	BaseURL               url.URL       `env:"BASE_URL"`
+	BaseURL               *url.URL      `env:"BASE_URL"`
 	ServerAddress         string        `env:"SERVER_ADDRESS" envDefault:"localhost:8080"`
 	ServerShutdownTimeout time.Duration `env:"SERVER_SHUTDOWN_TIMEOUT" envDefault:"5s"`
 	FileStoragePath       string        `env:"FILE_STORAGE_PATH"`
 }
 
-func main() {
-	var cfg Config
+var flagConfig = struct {
+	BaseURL         string
+	ServerAddress   string
+	FileStoragePath string
+}{}
 
-	// Парсим настройки сервиса, используя переменные окружения
-	if err := env.Parse(&cfg); err != nil {
+func init() {
+	flag.StringVar(&flagConfig.ServerAddress, "a", "", "Server listen address in the form of host:port")
+	flag.StringVar(&flagConfig.BaseURL, "b", "", "Base URL for short links")
+	flag.StringVar(&flagConfig.FileStoragePath, "f", "", "File path to persistent URL database storage")
+}
+
+func main() {
+	// Собираем настройки сервиса из аргументов командной строки и переменных окружения
+	cfg, err := configureSettings()
+	if err != nil {
 		log.Fatal(err)
 		return
 	}
 
-	URLStorage, err := configureStorage(&cfg)
+	URLStorage, err := configureStorage(cfg)
 	if err != nil {
 		log.Fatalf("unable to init and configure storage due to %s\n", err)
 		return
@@ -58,7 +70,7 @@ func main() {
 	}
 
 	// Запускаем сервер и при необходимости останавливаем его gracefully
-	startStopServer(server, &cfg)
+	startStopServer(server, cfg)
 }
 
 func startStopServer(server *http.Server, cfg *Config) {
@@ -70,7 +82,7 @@ func startStopServer(server *http.Server, cfg *Config) {
 			log.Fatalf("Failed to listen and serve due to: %s\n", err)
 		}
 	}()
-	log.Printf("Server started at %s", server.Addr)
+	log.Printf("Server started at %s with settings:\n%+v\n", server.Addr, cfg)
 
 	<-sigint
 	log.Print("Stopping the server...")
@@ -82,6 +94,32 @@ func startStopServer(server *http.Server, cfg *Config) {
 		log.Fatalf("Server shutdown failed due to: %s\n", err)
 	}
 	log.Print("Stopped the server successfully")
+}
+
+func configureSettings() (*Config, error) {
+	var cfg Config
+
+	// Парсим настройки сервиса, используя как переменные окружения...
+	if err := env.Parse(&cfg); err != nil {
+		return nil, err
+	}
+
+	// ..так и CLI-аргументы, значения которых имеют преимущество перед env-переменными
+	flag.Parse()
+	if flagConfig.BaseURL != "" {
+		u, err := url.Parse(flagConfig.BaseURL)
+		if err != nil {
+			return nil, err
+		}
+		cfg.BaseURL = u
+	}
+	if flagConfig.ServerAddress != "" {
+		cfg.ServerAddress = flagConfig.ServerAddress
+	}
+	if flagConfig.FileStoragePath != "" {
+		cfg.FileStoragePath = flagConfig.FileStoragePath
+	}
+	return &cfg, nil
 }
 
 // configureStorage инициализирует тип хранилища
