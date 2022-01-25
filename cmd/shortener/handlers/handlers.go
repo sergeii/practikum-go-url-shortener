@@ -19,7 +19,7 @@ type URLShortenerHandler struct {
 	BaseURL *url.URL
 }
 
-func (handler URLShortenerHandler) ShortenURLHelper(longURL string, r *http.Request) (*url.URL, error) {
+func (handler URLShortenerHandler) makeShortURL(longURL string, r *http.Request) (*url.URL, error) {
 	if longURL == "" {
 		return nil, errors.New("please provide a url to shorten")
 	}
@@ -54,13 +54,12 @@ func (handler URLShortenerHandler) ShortenURLHelper(longURL string, r *http.Requ
 // В случае отстуствия валидного URL в теле запроса вернет ошибку 400
 func (handler URLShortenerHandler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
-	defer r.Body.Close()
 	// Пытаемся получить длинный url из тела запроса
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	shortURL, err := handler.ShortenURLHelper(string(body), r)
+	shortURL, err := handler.makeShortURL(string(body), r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -108,15 +107,13 @@ type APIShortenResult struct {
 // В случае отстуствия валидного URL в теле запроса вернет ошибку 400
 func (handler URLShortenerHandler) APIShortenURL(w http.ResponseWriter, r *http.Request) {
 	var shortenReq APIShortenRequest
-
-	defer r.Body.Close()
 	// Получили невалидный json
 	if err := json.NewDecoder(r.Body).Decode(&shortenReq); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	shortURL, err := handler.ShortenURLHelper(shortenReq.URL, r)
+	shortURL, err := handler.makeShortURL(shortenReq.URL, r)
 	// Значение параметра невалидно
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
