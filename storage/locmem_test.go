@@ -3,7 +3,7 @@ package storage_test
 import (
 	"testing"
 
-	"github.com/sergeii/practikum-go-url-shortener/internal/app/storage"
+	"github.com/sergeii/practikum-go-url-shortener/storage"
 	"github.com/stretchr/testify/assert"
 )
 

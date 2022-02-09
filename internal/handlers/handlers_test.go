@@ -1,8 +1,13 @@
-package main
+package handlers_test
 
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/sergeii/practikum-go-url-shortener/config"
+	"github.com/sergeii/practikum-go-url-shortener/internal/app"
+	"github.com/sergeii/practikum-go-url-shortener/internal/router"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -10,13 +15,19 @@ import (
 	"net/url"
 	"strings"
 	"testing"
-
-	"github.com/sergeii/practikum-go-url-shortener/cmd/shortener/handlers"
-	"github.com/sergeii/practikum-go-url-shortener/internal/app/hasher"
-	"github.com/sergeii/practikum-go-url-shortener/internal/app/storage"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
+
+func prepareTestServer(cfg *config.Config) (*httptest.Server, func()) {
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	shorterner, _ := app.New(cfg)
+	ts := httptest.NewServer(router.New(shorterner))
+	return ts, func() {
+		ts.Close()
+		shorterner.Close()
+	}
+}
 
 func doTestRequest(t *testing.T, ts *httptest.Server, method, path string, body io.Reader) (*http.Response, string) {
 	req, err := http.NewRequest(method, ts.URL+path, body)
@@ -44,14 +55,8 @@ func TestShortenAndExpandAnyLengthURLs(t *testing.T) {
 		"https://www.google.com/search?q=golang&client=safari&ei=k3jbYbeDNMOxrgT-ha3gBA&start=10&sa=N&ved=2ahUKEwj3mPjk8aX1AhXDmIsKHf5CC0wQ8tMDegQIAhA5&biw=1280&bih=630&dpr=2",
 	}
 
-	handler := &handlers.URLShortenerHandler{
-		Storage: storage.NewLocmemURLStorerBackend(),
-		Hasher:  hasher.NewSimpleURLHasher(),
-	}
-	router := NewRouter(handler)
-	ts := httptest.NewServer(router)
-	defer ts.Close()
-
+	ts, stop := prepareTestServer(nil)
+	defer stop()
 	for _, TestURL := range TestURLs {
 		resp, body := doTestRequest(t, ts, http.MethodPost, "/", strings.NewReader(TestURL))
 		resp.Body.Close()
@@ -87,14 +92,8 @@ func TestShortenEndpointUnsupportedHTTPMethods(t *testing.T) {
 		},
 	}
 
-	handler := &handlers.URLShortenerHandler{
-		Storage: storage.NewLocmemURLStorerBackend(),
-		Hasher:  hasher.NewSimpleURLHasher(),
-	}
-	router := NewRouter(handler)
-	ts := httptest.NewServer(router)
-	defer ts.Close()
-
+	ts, stop := prepareTestServer(nil)
+	defer stop()
 	for _, tt := range tests {
 		t.Run(tt.method, func(t *testing.T) {
 			resp, _ := doTestRequest(t, ts, tt.method, "/", strings.NewReader("https://example.com/"))
@@ -127,14 +126,8 @@ func TestShortenEndpointRequiresURL(t *testing.T) {
 		},
 	}
 
-	handler := &handlers.URLShortenerHandler{
-		Storage: storage.NewLocmemURLStorerBackend(),
-		Hasher:  hasher.NewSimpleURLHasher(),
-	}
-	router := NewRouter(handler)
-	ts := httptest.NewServer(router)
-	defer ts.Close()
-
+	ts, stop := prepareTestServer(nil)
+	defer stop()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			resp, _ := doTestRequest(t, ts, http.MethodPost, "/", tt.body)
@@ -187,16 +180,9 @@ func TestShortenEndpointSupportsCustomizableBaseURL(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			baseURL, _ := url.Parse(tt.configURL)
-			handler := &handlers.URLShortenerHandler{
-				Storage: storage.NewLocmemURLStorerBackend(),
-				Hasher:  hasher.NewSimpleURLHasher(),
-				BaseURL: baseURL,
-			}
-			router := NewRouter(handler)
-			ts := httptest.NewServer(router)
-			defer ts.Close()
-
+			testBaseURL, _ := url.Parse(tt.configURL)
+			ts, stop := prepareTestServer(&config.Config{BaseURL: testBaseURL})
+			defer stop()
 			resp, body := doTestRequest(t, ts, http.MethodPost, "/", strings.NewReader("https://ya.ru/"))
 			resp.Body.Close()
 			assert.Equal(t, tt.want, body[:len(body)-7])
@@ -211,14 +197,6 @@ func TestAPIShortenAndExpandURLs(t *testing.T) {
 		"https://www.google.com/search?q=golang&client=safari&ei=k3jbYbeDNMOxrgT-ha3gBA&start=10&sa=N&ved=2ahUKEwj3mPjk8aX1AhXDmIsKHf5CC0wQ8tMDegQIAhA5&biw=1280&bih=630&dpr=2",
 	}
 
-	handler := &handlers.URLShortenerHandler{
-		Storage: storage.NewLocmemURLStorerBackend(),
-		Hasher:  hasher.NewSimpleURLHasher(),
-	}
-	router := NewRouter(handler)
-	ts := httptest.NewServer(router)
-	defer ts.Close()
-
 	type ShortenReqBody struct {
 		URL string `json:"url"`
 	}
@@ -226,6 +204,8 @@ func TestAPIShortenAndExpandURLs(t *testing.T) {
 		Result string `json:"result"`
 	}
 
+	ts, stop := prepareTestServer(nil)
+	defer stop()
 	for _, TestURL := range TestURLs {
 		reqJSON, _ := json.Marshal(&ShortenReqBody{URL: TestURL})
 		resp, body := doTestRequest(t, ts, http.MethodPost, "/api/shorten", bytes.NewReader(reqJSON))
@@ -266,14 +246,8 @@ func TestAPIShortenURLUnsupportedHTTPMethods(t *testing.T) {
 		},
 	}
 
-	handler := &handlers.URLShortenerHandler{
-		Storage: storage.NewLocmemURLStorerBackend(),
-		Hasher:  hasher.NewSimpleURLHasher(),
-	}
-	router := NewRouter(handler)
-	ts := httptest.NewServer(router)
-	defer ts.Close()
-
+	ts, stop := prepareTestServer(nil)
+	defer stop()
 	for _, tt := range tests {
 		t.Run(tt.method, func(t *testing.T) {
 			resp, _ := doTestRequest(t, ts, tt.method, "/api/shorten/", strings.NewReader(`{"url": "https://example.com/"}`))
@@ -331,14 +305,8 @@ func TestAPIShortenEndpointRequiresValidJSON(t *testing.T) {
 		},
 	}
 
-	handler := &handlers.URLShortenerHandler{
-		Storage: storage.NewLocmemURLStorerBackend(),
-		Hasher:  hasher.NewSimpleURLHasher(),
-	}
-	router := NewRouter(handler)
-	ts := httptest.NewServer(router)
-	defer ts.Close()
-
+	ts, stop := prepareTestServer(nil)
+	defer stop()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			resp, _ := doTestRequest(t, ts, http.MethodPost, "/api/shorten", tt.body)
@@ -353,14 +321,8 @@ func TestAPIShortenEndpointRequiresValidJSON(t *testing.T) {
 }
 
 func TestExpandEndpointRequiresShortURLID(t *testing.T) {
-	handler := &handlers.URLShortenerHandler{
-		Storage: storage.NewLocmemURLStorerBackend(),
-		Hasher:  hasher.NewSimpleURLHasher(),
-	}
-	router := NewRouter(handler)
-	ts := httptest.NewServer(router)
-	defer ts.Close()
-
+	ts, stop := prepareTestServer(nil)
+	defer stop()
 	resp, _ := doTestRequest(t, ts, http.MethodGet, "/", nil)
 	resp.Body.Close()
 	assert.Equal(t, 405, resp.StatusCode)
@@ -393,17 +355,11 @@ func TestExpandEndpointRequiresProperID(t *testing.T) {
 		},
 	}
 
-	handler := &handlers.URLShortenerHandler{
-		Storage: &storage.LocmemURLStorerBackend{
-			Storage: map[string]string{
-				"gogogo": "https://go.dev/",
-			},
-		},
-		Hasher: hasher.NewSimpleURLHasher(),
-	}
-	router := NewRouter(handler)
-	ts := httptest.NewServer(router)
+	shorterner, _ := app.New(&config.Config{})
+	shorterner.Storage.Set("gogogo", "https://go.dev/")
+	ts := httptest.NewServer(router.New(shorterner))
 	defer ts.Close()
+	defer shorterner.Close()
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -3,41 +3,39 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"github.com/sergeii/practikum-go-url-shortener/internal/app"
+	"github.com/sergeii/practikum-go-url-shortener/storage"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/sergeii/practikum-go-url-shortener/internal/app/hasher"
-	"github.com/sergeii/practikum-go-url-shortener/internal/app/storage"
 )
 
-type URLShortenerHandler struct {
-	Storage storage.URLStorer
-	Hasher  hasher.URLHasher
-	BaseURL *url.URL
+type Handler struct {
+	App *app.App
 }
 
-func (handler URLShortenerHandler) makeShortURL(longURL string, r *http.Request) (*url.URL, error) {
+func (handler Handler) makeShortURL(longURL string, r *http.Request) (*url.URL, error) {
 	if longURL == "" {
 		return nil, errors.New("please provide a url to shorten")
 	}
 	// Получаем короткий идентификатор для ссылки и кладем пару в хранилище
-	shortURLID := handler.Hasher.HashURL(longURL)
-	handler.Storage.Set(shortURLID, longURL)
+	shortURLID := handler.App.Hasher.Hash(longURL)
+	handler.App.Storage.Set(shortURLID, longURL)
 	// Мы возвращаем короткую ссылку используя настройки базового URL сервиса
 	// В случае его отстуствия используем имя хоста, с которым был совершен запрос
 	baseURLScheme, baseURLHost, baseURLPath := "http", r.Host, "/"
-	if handler.BaseURL != nil {
-		if handler.BaseURL.Scheme != "" {
-			baseURLScheme = handler.BaseURL.Scheme
+	if handler.App.Config.BaseURL != nil {
+		if handler.App.Config.BaseURL.Scheme != "" {
+			baseURLScheme = handler.App.Config.BaseURL.Scheme
 		}
-		if handler.BaseURL.Host != "" {
-			baseURLHost = handler.BaseURL.Host
+		if handler.App.Config.BaseURL.Host != "" {
+			baseURLHost = handler.App.Config.BaseURL.Host
 		}
-		if handler.BaseURL.Path != "" {
-			baseURLPath = handler.BaseURL.Path
+		if handler.App.Config.BaseURL.Path != "" {
+			baseURLPath = handler.App.Config.BaseURL.Path
 		}
 	}
 	shortURLPath := strings.TrimRight(baseURLPath, "/") + "/" + shortURLID
@@ -52,7 +50,7 @@ func (handler URLShortenerHandler) makeShortURL(longURL string, r *http.Request)
 // при переходе по которой пользователь попадет на оригинальный "длинный" URL
 // В случае успеха возвращает код 201 и готовую короткую ссылку в теле ответа
 // В случае отстуствия валидного URL в теле запроса вернет ошибку 400
-func (handler URLShortenerHandler) ShortenURL(w http.ResponseWriter, r *http.Request) {
+func (handler Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	// Пытаемся получить длинный url из тела запроса
 	if err != nil {
@@ -71,7 +69,7 @@ func (handler URLShortenerHandler) ShortenURL(w http.ResponseWriter, r *http.Req
 // ExpandURL перенаправляет пользователя, перешедшего по короткой ссылке, на оригинальный "длинный" URL.
 // В случае успеха возвращает код 307 с редиректом на оригинальный URL
 // В случае неизвестной сервису короткой ссылки возвращает ошибку 404
-func (handler URLShortenerHandler) ExpandURL(w http.ResponseWriter, r *http.Request) {
+func (handler Handler) ExpandURL(w http.ResponseWriter, r *http.Request) {
 	// Пытаемся получить id короткой ссылки из пути
 	// и найти по нему длинную ссылку, которую затем возвращаем в виде 307 редиректа
 	shortURLID := chi.URLParam(r, "slug")
@@ -79,7 +77,7 @@ func (handler URLShortenerHandler) ExpandURL(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "Invalid short url", http.StatusBadRequest)
 		return
 	}
-	longURL, err := handler.Storage.Get(shortURLID)
+	longURL, err := handler.App.Storage.Get(shortURLID)
 	if err != nil {
 		if errors.Is(err, storage.ErrURLNotFound) {
 			// Короткая ссылка не найдена в хранилище - ожидаемое поведение, возвращаем 404
@@ -105,7 +103,7 @@ type APIShortenResult struct {
 // Эндпоинт принимает ссылку в виде json, URL в котором указывается ключем "url"
 // В случае успеха возвращает код 201 и готовую короткую ссылку в теле ответа, так же в виде json.
 // В случае отстуствия валидного URL в теле запроса вернет ошибку 400
-func (handler URLShortenerHandler) APIShortenURL(w http.ResponseWriter, r *http.Request) {
+func (handler Handler) APIShortenURL(w http.ResponseWriter, r *http.Request) {
 	var shortenReq APIShortenRequest
 	// Получили невалидный json
 	if err := json.NewDecoder(r.Body).Decode(&shortenReq); err != nil {
