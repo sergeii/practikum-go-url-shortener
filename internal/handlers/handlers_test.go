@@ -406,6 +406,7 @@ func TestSetAndGetUserURLS(t *testing.T) {
 		req, _ := http.NewRequest("POST", ts.URL+"/", strings.NewReader(testURL))
 		req.AddCookie(authCookie)
 		resp, _ := http.DefaultClient.Do(req)
+		resp.Body.Close()
 		assert.Equal(t, 201, resp.StatusCode)
 	}
 

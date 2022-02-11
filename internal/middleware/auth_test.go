@@ -31,12 +31,12 @@ func TestNewAuthCookieIsSet(t *testing.T) {
 	rr := mwtest.RequestWithMiddleware(HelloIDHandler, middleware.WithAuthentication(secretKey), req)
 
 	cookie := parseAuthSetCookie(rr)
-	cookieIsValid, userId := verifyAuthCookie(cookie.Value, secretKey)
+	cookieIsValid, userID := verifyAuthCookie(cookie.Value, secretKey)
 
 	require.Equal(t, rr.Code, 200)
-	assert.True(t, userId != "")
+	assert.True(t, userID != "")
 	assert.True(t, cookieIsValid)
-	assert.Equal(t, rr.Body.String(), "Hello, "+userId)
+	assert.Equal(t, rr.Body.String(), "Hello, "+userID)
 }
 
 func TestPreviousAuthCookieIsAccepted(t *testing.T) {
@@ -118,11 +118,11 @@ func TestInvalidAuthCookieIsIgnoredNewIsSet(t *testing.T) {
 				assert.Equal(t, rr.Body.String(), "Hello, deadbeef")
 			} else {
 				cookie := parseAuthSetCookie(rr)
-				cookieIsValid, userId := verifyAuthCookie(cookie.Value, secretKey)
+				cookieIsValid, userID := verifyAuthCookie(cookie.Value, secretKey)
 				assert.NotEqual(t, cookie.Value, tt.cookie.Value)
-				assert.True(t, userId != "")
+				assert.True(t, userID != "")
 				assert.True(t, cookieIsValid)
-				assert.Equal(t, rr.Body.String(), "Hello, "+userId)
+				assert.Equal(t, rr.Body.String(), "Hello, "+userID)
 			}
 		})
 	}

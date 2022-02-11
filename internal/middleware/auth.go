@@ -22,7 +22,7 @@ const AuthUserCookieExpiration = time.Hour * 24 * 365
 const UserIDLength = 8 // in bytes
 
 var ErrInvalidCookieValue = errors.New("authentication cookie is corrupt")
-var ErrInvalidUserId = errors.New("authentication cookie has invalid user id")
+var ErrInvalidUserID = errors.New("authentication cookie has invalid user id")
 var ErrIncorrectCookieSig = errors.New("authentication cookie signature is not correct")
 
 type AuthUser struct {
@@ -48,7 +48,7 @@ func authenticateUser(r *http.Request, secretKey []byte) (*AuthUser, error) {
 	userID := cookieParts[0]
 	// user id не может быть пустым
 	if userID == "" {
-		return nil, ErrInvalidUserId
+		return nil, ErrInvalidUserID
 	}
 	cookieSig, err := base64.StdEncoding.DecodeString(cookieParts[1])
 	if err != nil {
