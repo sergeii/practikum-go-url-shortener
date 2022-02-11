@@ -1,9 +1,7 @@
 package main
 
 import (
-	"github.com/sergeii/practikum-go-url-shortener/config"
 	"github.com/sergeii/practikum-go-url-shortener/internal/app"
-	"github.com/sergeii/practikum-go-url-shortener/internal/middleware"
 	"github.com/sergeii/practikum-go-url-shortener/internal/router"
 	"github.com/sergeii/practikum-go-url-shortener/pkg/http/server"
 	"log"
@@ -12,7 +10,7 @@ import (
 
 func main() {
 	// Собираем настройки сервиса из аргументов командной строки и переменных окружения
-	cfg, err := config.Configure()
+	cfg, err := ConfigureSettings()
 	if err != nil {
 		log.Fatalf("failed to init config due to %s\n", err)
 	}
@@ -30,7 +28,7 @@ func main() {
 	rtr := router.New(shortener)
 	svr := &http.Server{
 		Addr:    shortener.Config.ServerAddress,
-		Handler: middleware.WithMiddleware(rtr, middleware.GzipSupport),
+		Handler: rtr,
 	}
 	err = server.Start(svr, server.WithShutdownTimeout(shortener.Config.ServerShutdownTimeout))
 	if err != nil {

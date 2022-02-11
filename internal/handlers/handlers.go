@@ -3,27 +3,21 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"github.com/go-chi/chi/v5"
 	"github.com/sergeii/practikum-go-url-shortener/internal/app"
+	"github.com/sergeii/practikum-go-url-shortener/internal/middleware"
 	"github.com/sergeii/practikum-go-url-shortener/storage"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
-
-	"github.com/go-chi/chi/v5"
 )
 
 type Handler struct {
 	App *app.App
 }
 
-func (handler Handler) makeShortURL(longURL string, r *http.Request) (*url.URL, error) {
-	if longURL == "" {
-		return nil, errors.New("please provide a url to shorten")
-	}
-	// Получаем короткий идентификатор для ссылки и кладем пару в хранилище
-	shortURLID := handler.App.Hasher.Hash(longURL)
-	handler.App.Storage.Set(shortURLID, longURL)
+func (handler Handler) constructShortURL(shortID string, r *http.Request) *url.URL {
 	// Мы возвращаем короткую ссылку используя настройки базового URL сервиса
 	// В случае его отстуствия используем имя хоста, с которым был совершен запрос
 	baseURLScheme, baseURLHost, baseURLPath := "http", r.Host, "/"
@@ -38,12 +32,27 @@ func (handler Handler) makeShortURL(longURL string, r *http.Request) (*url.URL, 
 			baseURLPath = handler.App.Config.BaseURL.Path
 		}
 	}
-	shortURLPath := strings.TrimRight(baseURLPath, "/") + "/" + shortURLID
+	shortURLPath := strings.TrimRight(baseURLPath, "/") + "/" + shortID
 	return &url.URL{
 		Scheme: baseURLScheme,
 		Host:   baseURLHost,
 		Path:   shortURLPath,
-	}, nil
+	}
+}
+
+func (handler Handler) shortenAndSaveLongURL(longURL string, r *http.Request) (*url.URL, error) {
+	var userID string
+	if longURL == "" {
+		return nil, errors.New("please provide a url to shorten")
+	}
+	if user, ok := r.Context().Value(middleware.AuthContextKey).(*middleware.AuthUser); ok {
+		userID = user.ID
+	}
+	// Получаем короткий идентификатор для ссылки и кладем пару в хранилище
+	shortID := handler.App.Hasher.Hash(longURL)
+	handler.App.Storage.Set(shortID, longURL, userID)
+	shortURL := handler.constructShortURL(shortID, r)
+	return shortURL, nil
 }
 
 // ShortenURL принимает на вход произвольный URL в теле запроса и создает для него "короткую" версию,
@@ -57,7 +66,7 @@ func (handler Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	shortURL, err := handler.makeShortURL(string(body), r)
+	shortURL, err := handler.shortenAndSaveLongURL(string(body), r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -91,14 +100,6 @@ func (handler Handler) ExpandURL(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, longURL, http.StatusTemporaryRedirect)
 }
 
-type APIShortenRequest struct {
-	URL string `json:"url"` // Оригинальный длинный URL, требующий укорачивания
-}
-
-type APIShortenResult struct {
-	Result string `json:"result"` // Короткий URL, превращенный из длинного
-}
-
 // APIShortenURL по аналогии с ShortenURL принимает на вход произвольный URL и создает для него короткую ссылку.
 // Эндпоинт принимает ссылку в виде json, URL в котором указывается ключем "url"
 // В случае успеха возвращает код 201 и готовую короткую ссылку в теле ответа, так же в виде json.
@@ -111,7 +112,7 @@ func (handler Handler) APIShortenURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shortURL, err := handler.makeShortURL(shortenReq.URL, r)
+	shortURL, err := handler.shortenAndSaveLongURL(shortenReq.URL, r)
 	// Значение параметра невалидно
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -127,4 +128,36 @@ func (handler Handler) APIShortenURL(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	w.Write(respBody)
+}
+
+func (handler Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
+	user, ok := r.Context().Value(middleware.AuthContextKey).(*middleware.AuthUser)
+	if !ok {
+		http.Error(w, "not authenticated", http.StatusForbidden)
+		return
+	}
+	items := handler.App.Storage.GetURLsByUserID(user.ID)
+	// Не найдено ни одной ссылки для текущего пользователя
+	if len(items) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	// Серилизуем полученный результат
+	jsonItems := make([]APIUserURLItem, 0, len(items))
+	for shortID, longURL := range items {
+		item := APIUserURLItem{
+			ShortURL:    handler.constructShortURL(shortID, r).String(),
+			OriginalURL: longURL,
+		}
+		jsonItems = append(jsonItems, item)
+	}
+	result, err := json.Marshal(jsonItems)
+	// Не удалось серилизовать json по некой очень редкой проблеме
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(result)
 }

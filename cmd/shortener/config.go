@@ -1,21 +1,14 @@
-package config
+package main
 
 import (
 	"flag"
 	"github.com/caarlos0/env/v6"
+	"github.com/sergeii/practikum-go-url-shortener/internal/app"
 	"net/url"
-	"time"
 )
 
-type Config struct {
-	BaseURL               *url.URL      `env:"BASE_URL"`
-	ServerAddress         string        `env:"SERVER_ADDRESS" envDefault:"localhost:8080"`
-	ServerShutdownTimeout time.Duration `env:"SERVER_SHUTDOWN_TIMEOUT" envDefault:"5s"`
-	FileStoragePath       string        `env:"FILE_STORAGE_PATH"`
-}
-
-func Configure() (*Config, error) {
-	var cfg Config
+func ConfigureSettings() (*app.Config, error) {
+	var cfg app.Config
 
 	// Парсим настройки сервиса, используя как переменные окружения...
 	if err := env.Parse(&cfg); err != nil {

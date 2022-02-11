@@ -1,7 +1,6 @@
 package router_test
 
 import (
-	"github.com/sergeii/practikum-go-url-shortener/config"
 	"github.com/sergeii/practikum-go-url-shortener/internal/app"
 	"github.com/sergeii/practikum-go-url-shortener/internal/router"
 	"github.com/stretchr/testify/require"
@@ -13,7 +12,7 @@ import (
 )
 
 func getTestServer() (*httptest.Server, func()) {
-	a, _ := app.New(&config.Config{})
+	a, _ := app.New(&app.Config{})
 	ts := httptest.NewServer(router.New(a))
 	return ts, func() {
 		a.Close()

@@ -3,9 +3,11 @@ package handlers_test
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/sergeii/practikum-go-url-shortener/config"
 	"github.com/sergeii/practikum-go-url-shortener/internal/app"
+	"github.com/sergeii/practikum-go-url-shortener/internal/handlers"
+	"github.com/sergeii/practikum-go-url-shortener/internal/middleware"
 	"github.com/sergeii/practikum-go-url-shortener/internal/router"
+	"github.com/sergeii/practikum-go-url-shortener/pkg/security/sign"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"io"
@@ -15,11 +17,28 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
-func prepareTestServer(cfg *config.Config) (*httptest.Server, func()) {
+func setAuthCookie(r *http.Request, secretKey []byte, userID string) *http.Cookie {
+	signer := sign.New(secretKey)
+	signature64 := signer.Sign64([]byte(userID))
+	cookieValue := userID + ":" + signature64
+	cookieExpiresAt := time.Now().Add(middleware.AuthUserCookieExpiration)
+	cookie := &http.Cookie{
+		Name:    middleware.AuthUserCookieName,
+		Value:   cookieValue,
+		Expires: cookieExpiresAt,
+	}
+	if r != nil {
+		r.AddCookie(cookie)
+	}
+	return cookie
+}
+
+func prepareTestServer(cfg *app.Config) (*httptest.Server, func()) {
 	if cfg == nil {
-		cfg = &config.Config{}
+		cfg = &app.Config{}
 	}
 	shorterner, _ := app.New(cfg)
 	ts := httptest.NewServer(router.New(shorterner))
@@ -181,7 +200,7 @@ func TestShortenEndpointSupportsCustomizableBaseURL(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			testBaseURL, _ := url.Parse(tt.configURL)
-			ts, stop := prepareTestServer(&config.Config{BaseURL: testBaseURL})
+			ts, stop := prepareTestServer(&app.Config{BaseURL: testBaseURL})
 			defer stop()
 			resp, body := doTestRequest(t, ts, http.MethodPost, "/", strings.NewReader("https://ya.ru/"))
 			resp.Body.Close()
@@ -355,8 +374,8 @@ func TestExpandEndpointRequiresProperID(t *testing.T) {
 		},
 	}
 
-	shorterner, _ := app.New(&config.Config{})
-	shorterner.Storage.Set("gogogo", "https://go.dev/")
+	shorterner, _ := app.New(&app.Config{})
+	shorterner.Storage.Set("gogogo", "https://go.dev/", "")
 	ts := httptest.NewServer(router.New(shorterner))
 	defer ts.Close()
 	defer shorterner.Close()
@@ -370,6 +389,98 @@ func TestExpandEndpointRequiresProperID(t *testing.T) {
 			} else {
 				assert.Equal(t, 307, resp.StatusCode)
 				assert.Equal(t, tt.result, resp.Header.Get("Location"))
+			}
+		})
+	}
+}
+
+func TestSetAndGetUserURLS(t *testing.T) {
+	shorterner, _ := app.New(&app.Config{})
+	ts := httptest.NewServer(router.New(shorterner))
+	defer ts.Close()
+	defer shorterner.Close()
+
+	testURLs := []string{"https://ya.ru", "https://go.dev/"}
+	authCookie := setAuthCookie(nil, shorterner.SecretKey, "user1")
+	for _, testURL := range testURLs {
+		req, _ := http.NewRequest("POST", ts.URL+"/", strings.NewReader(testURL))
+		req.AddCookie(authCookie)
+		resp, _ := http.DefaultClient.Do(req)
+		assert.Equal(t, 201, resp.StatusCode)
+	}
+
+	req, _ := http.NewRequest("GET", ts.URL+"/user/urls", nil)
+	req.AddCookie(authCookie)
+	resp, _ := http.DefaultClient.Do(req)
+	body, _ := ioutil.ReadAll(resp.Body)
+	resp.Body.Close()
+	jsonItems := make([]handlers.APIUserURLItem, 0)
+	json.Unmarshal(body, &jsonItems)
+	longUserURLs := make([]string, 0)
+	for _, item := range jsonItems {
+		longUserURLs = append(longUserURLs, item.OriginalURL)
+	}
+	assert.ElementsMatch(t, testURLs, longUserURLs)
+	assert.Equal(t, 200, resp.StatusCode)
+}
+
+func TestGetUserURLs(t *testing.T) {
+	tests := []struct {
+		name   string
+		userID string
+		URLs   []string
+	}{
+		{
+			name:   "user has 2 urls",
+			userID: "user1",
+			URLs:   []string{"go", "ya"},
+		},
+		{
+			name:   "user has 1 url",
+			userID: "user2",
+			URLs:   []string{"imdb"},
+		},
+		{
+			name:   "user has no urls",
+			userID: "user3",
+			URLs:   []string{},
+		},
+		{
+			name:   "anonymous user has no urls",
+			userID: "",
+			URLs:   []string{},
+		},
+	}
+
+	shorterner, _ := app.New(&app.Config{})
+	shorterner.Storage.Set("go", "https://go.dev/", "user1")
+	shorterner.Storage.Set("ya", "https://ya.ru/", "user1")
+	shorterner.Storage.Set("imdb", "https://www.imdb.com/", "user2")
+	ts := httptest.NewServer(router.New(shorterner))
+	defer ts.Close()
+	defer shorterner.Close()
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, _ := http.NewRequest("GET", ts.URL+"/user/urls", nil)
+			if tt.userID != "" {
+				setAuthCookie(req, shorterner.SecretKey, tt.userID)
+			}
+			resp, _ := http.DefaultClient.Do(req)
+			body, _ := ioutil.ReadAll(resp.Body)
+			resp.Body.Close()
+			if len(tt.URLs) == 0 {
+				assert.Equal(t, 204, resp.StatusCode)
+			} else {
+				jsonItems := make([]handlers.APIUserURLItem, 0)
+				json.Unmarshal(body, &jsonItems)
+				userShortURLs := make([]string, 0)
+				for _, item := range jsonItems {
+					u, _ := url.Parse(item.ShortURL)
+					userShortURLs = append(userShortURLs, u.Path[1:])
+				}
+				assert.ElementsMatch(t, tt.URLs, userShortURLs)
+				assert.Equal(t, 200, resp.StatusCode)
 			}
 		})
 	}

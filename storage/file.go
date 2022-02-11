@@ -8,20 +8,25 @@ import (
 	"os"
 )
 
+type FileURLItem struct {
+	LongURL string
+	UserID  string
+}
+
 type FileURLStorerBackend struct {
 	filename string
-	cache    map[string]string
+	cache    map[string]FileURLItem
 }
 
 func NewFileURLStorerBackend(filename string) (*FileURLStorerBackend, error) {
-	cache := make(map[string]string)
+	cache := make(map[string]FileURLItem)
 	// Считываем с диска записи, сохраненные ранее, и заполняем ими кэш,
 	// с которым мы и будем работать до завершения программы
 	file, err := os.OpenFile(filename, os.O_RDONLY, 0777)
 	if err != nil {
 		// Если файл не найден, то ничего страшного - это ожидаемое поведение при первом запуске сервиса
 		if os.IsNotExist(err) {
-			log.Printf("file %s not found; will start with empty cache\n", filename)
+			log.Printf("file %s not found; will start with empty Storage\n", filename)
 		} else {
 			log.Printf("error opening %s: %s\n", filename, err)
 			return nil, err
@@ -32,30 +37,39 @@ func NewFileURLStorerBackend(filename string) (*FileURLStorerBackend, error) {
 		if err := decoder.Decode(&cache); err != nil {
 			// Файл пустой - ожидаемое поведение
 			if errors.Is(err, io.EOF) {
-				log.Printf("file is empty %s; will start with empty cache\n", filename)
+				log.Printf("file is empty %s; will start with empty Storage\n", filename)
 			} else {
-				log.Printf("unable to populate cache from %s due to %s\n", filename, err)
+				log.Printf("unable to populate Storage from %s due to %s\n", filename, err)
 				return nil, err
 			}
 		}
 	}
-
-	return &FileURLStorerBackend{
-		filename: filename,
-		cache:    cache,
-	}, nil
+	return &FileURLStorerBackend{filename, cache}, nil
 }
 
-func (backend FileURLStorerBackend) Set(shortURLID, longURL string) {
-	backend.cache[shortURLID] = longURL
+func (backend FileURLStorerBackend) Set(shortURLID, longURL, userID string) {
+	backend.cache[shortURLID] = FileURLItem{longURL, userID}
 }
 
 func (backend FileURLStorerBackend) Get(shortURLID string) (string, error) {
-	longURL, found := backend.cache[shortURLID]
+	item, found := backend.cache[shortURLID]
 	if !found {
 		return "", ErrURLNotFound
 	}
-	return longURL, nil
+	return item.LongURL, nil
+}
+
+func (backend FileURLStorerBackend) GetURLsByUserID(userID string) map[string]string {
+	items := make(map[string]string)
+	if userID == "" {
+		return items
+	}
+	for shortURL, item := range backend.cache {
+		if item.UserID == userID {
+			items[shortURL] = item.LongURL
+		}
+	}
+	return items
 }
 
 func (backend FileURLStorerBackend) Close() error {
@@ -63,12 +77,12 @@ func (backend FileURLStorerBackend) Close() error {
 	// который будет использован при следующем старте программы
 	file, err := os.OpenFile(backend.filename, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0777)
 	if err != nil {
-		log.Printf("unable to open file %s for dumping cache due to %s\n", backend.filename, err)
+		log.Printf("unable to open file %s for dumping Storage due to %s\n", backend.filename, err)
 		return err
 	}
 	defer file.Close()
 	if err := json.NewEncoder(file).Encode(&backend.cache); err != nil {
-		log.Printf("unable to dump cache to %s due to %s\n", backend.filename, err)
+		log.Printf("unable to dump Storage to %s due to %s\n", backend.filename, err)
 		return err
 	}
 	return nil

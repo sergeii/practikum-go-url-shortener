@@ -16,6 +16,10 @@ func (w gzipResponseWriter) Write(b []byte) (int, error) {
 	return w.Writer.Write(b)
 }
 
+// GzipSupport добавляет опциональную (по запрос клиентов)
+// поддержку компрессии и декомпрессии соответственно для ответов и запросов
+// Поддержка осуществляется прозрачно для хэндлеров благодаря оборачиванию
+// ридера и райтера в соответствующие gzip-сущности
 func GzipSupport(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Получили запрос, закодированный в gip - оборачиваем Body в gzip.Reader
