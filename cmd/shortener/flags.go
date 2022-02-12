@@ -2,34 +2,28 @@ package main
 
 import (
 	"flag"
-	"github.com/caarlos0/env/v6"
-	"github.com/sergeii/practikum-go-url-shortener/internal/app"
 	"net/url"
+
+	"github.com/sergeii/practikum-go-url-shortener/internal/app"
 )
 
-func ConfigureSettings() (*app.Config, error) {
-	var cfg app.Config
-
-	// Парсим настройки сервиса, используя как переменные окружения...
-	if err := env.Parse(&cfg); err != nil {
-		return nil, err
-	}
-
-	// ..так и CLI-аргументы
+func useFlags(cfg *app.Config) error {
 	flagConfig := struct {
 		BaseURL         string
 		ServerAddress   string
 		FileStoragePath string
+		DatabaseDSN     string
 	}{}
 	flag.StringVar(&flagConfig.ServerAddress, "a", "", "Server listen address in the form of host:port")
 	flag.StringVar(&flagConfig.BaseURL, "b", "", "Base URL for short links")
 	flag.StringVar(&flagConfig.FileStoragePath, "f", "", "File path to persistent URL database storage")
+	flag.StringVar(&flagConfig.DatabaseDSN, "d", "", "Database connection DSN")
 	flag.Parse()
 	// Указанные значения настроек из CLI-аргументов имеют преимущество перед одноименными environment переменными
 	if flagConfig.BaseURL != "" {
 		u, err := url.Parse(flagConfig.BaseURL)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		cfg.BaseURL = u
 	}
@@ -39,6 +33,8 @@ func ConfigureSettings() (*app.Config, error) {
 	if flagConfig.FileStoragePath != "" {
 		cfg.FileStoragePath = flagConfig.FileStoragePath
 	}
-
-	return &cfg, nil
+	if flagConfig.DatabaseDSN != "" {
+		cfg.DatabaseDSN = flagConfig.DatabaseDSN
+	}
+	return nil
 }

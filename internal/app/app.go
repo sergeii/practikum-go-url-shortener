@@ -1,13 +1,20 @@
 package app
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"github.com/sergeii/practikum-go-url-shortener/pkg/url/hasher"
-	"github.com/sergeii/practikum-go-url-shortener/storage"
+	"log"
 	"net/url"
 	"time"
+
+	"github.com/caarlos0/env/v6"
+
+	"github.com/jackc/pgx/v4/pgxpool"
+
+	"github.com/sergeii/practikum-go-url-shortener/pkg/url/hasher"
+	"github.com/sergeii/practikum-go-url-shortener/storage"
 )
 
 const SecretKeyLength = 32
@@ -18,38 +25,63 @@ type Config struct {
 	ServerShutdownTimeout time.Duration `env:"SERVER_SHUTDOWN_TIMEOUT" envDefault:"5s"`
 	FileStoragePath       string        `env:"FILE_STORAGE_PATH"`
 	SecretKey             string        `env:"SECRET_KEY"`
+	DatabaseDSN           string        `env:"DATABASE_DSN" envDefault:"postgres://shortener:shortener@localhost:5432/shortener"` // nolint:lll
+	DatabasePingTimeout   time.Duration `env:"DATABASE_PING_TIMEOUT" envDefault:"5s"`
 }
 
 type App struct {
 	Config    *Config
 	Storage   storage.URLStorer
 	Hasher    hasher.Hasher
+	DB        *pgxpool.Pool
 	SecretKey []byte
 }
 
-func New(cfg *Config) (*App, error) {
-	store, err := configureStorage(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("unable to configure storage due to %s", err)
+type Override func(*Config) error
+
+func New(overrides ...Override) (*App, error) {
+	var cfg Config
+	// Получаем настройки приложения из environment-переменных
+	if err := env.Parse(&cfg); err != nil {
+		return nil, err
 	}
-	secretKey, err := configureSecretKey(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("unable to configure secret key due to %s", err)
+	// даем возможность переопределить настройки, например в тестах или при использовании флагов
+	for _, override := range overrides {
+		if err := override(&cfg); err != nil {
+			return nil, err
+		}
 	}
+
+	store, err := configureStorage(&cfg)
+	if err != nil {
+		return nil, fmt.Errorf("unable to configure storage due to %w", err)
+	}
+
+	secretKey, err := configureSecretKey(&cfg)
+	if err != nil {
+		return nil, fmt.Errorf("unable to configure secret key due to %w", err)
+	}
+
+	db, err := ConfigureDatabase(&cfg)
+	if err != nil {
+		return nil, fmt.Errorf("unable to configure database due to %w", err)
+	}
+
 	app := &App{
 		Storage:   store,
 		Hasher:    hasher.NewNaiveHasher(),
-		Config:    cfg,
+		Config:    &cfg,
+		DB:        db,
 		SecretKey: secretKey,
 	}
 	return app, nil
 }
 
-func (app *App) Close() error {
+func (app *App) Close() {
 	if err := app.Storage.Close(); err != nil {
-		return fmt.Errorf("failed to close storage %s due to %s; possible data loss", app.Storage, err)
+		log.Printf("failed to close storage %s due to %s; possible data loss", app.Storage, err)
 	}
-	return nil
+	app.DB.Close()
 }
 
 // configureStorage инициализирует тип хранилища
@@ -77,9 +109,12 @@ func configureSecretKey(cfg *Config) ([]byte, error) {
 
 func GenerateSecretKey(length int) ([]byte, error) {
 	randKey := make([]byte, length)
-	_, err := rand.Read(randKey)
-	if err != nil {
+	if _, err := rand.Read(randKey); err != nil {
 		return nil, err
 	}
 	return randKey, nil
+}
+
+func ConfigureDatabase(cfg *Config) (*pgxpool.Pool, error) {
+	return pgxpool.Connect(context.Background(), cfg.DatabaseDSN)
 }

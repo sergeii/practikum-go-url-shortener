@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -34,19 +35,19 @@ func Start(server *http.Server, opts ...Option) error {
 	}
 
 	shutdown := make(chan os.Signal, 1)
-	errors := make(chan error, 1)
+	fatal := make(chan error, 1)
 	signal.Notify(shutdown, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			errors <- err
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			fatal <- err
 		}
 	}()
 	log.Printf("Server started at %s with settings:\n%+v\n", server.Addr, cfg)
 
 	select {
-	case err := <-errors:
-		return fmt.Errorf("failed to listen and serve due to: %s", err)
+	case err := <-fatal:
+		return fmt.Errorf("failed to listen and serve due to: %w", err)
 	case <-shutdown:
 		return stopGracefully(server, &cfg)
 	}
@@ -58,7 +59,7 @@ func stopGracefully(server *http.Server, cfg *serverConfig) error {
 
 	log.Print("Stopping the server...")
 	if err := server.Shutdown(ctx); err != nil {
-		return fmt.Errorf("server shutdown failed due to: %s", err)
+		return fmt.Errorf("server shutdown failed due to: %w", err)
 	}
 	log.Print("Stopped the server successfully")
 	return nil

@@ -1,16 +1,19 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"log"
+	"net/http"
+	"net/url"
+	"strings"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/sergeii/practikum-go-url-shortener/internal/app"
 	"github.com/sergeii/practikum-go-url-shortener/internal/middleware"
 	"github.com/sergeii/practikum-go-url-shortener/storage"
-	"io"
-	"net/http"
-	"net/url"
-	"strings"
 )
 
 type Handler struct {
@@ -72,7 +75,7 @@ func (handler Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusCreated)
-	w.Write([]byte(shortURL.String()))
+	w.Write([]byte(shortURL.String())) // nolint:errcheck
 }
 
 // ExpandURL перенаправляет пользователя, перешедшего по короткой ссылке, на оригинальный "длинный" URL.
@@ -127,9 +130,12 @@ func (handler Handler) APIShortenURL(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	w.Write(respBody)
+	w.Write(respBody) // nolint:errcheck
 }
 
+// GetUserURLs возвращает полный список всех ссылок, сокращенных текущим пользователем.
+// Ссылки возвращаются парами Длинный URL + Короткий URL
+// В случае отсутствия ссылок у пользователя, возвращается статус 204 без тела ответа
 func (handler Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 	user, ok := r.Context().Value(middleware.AuthContextKey).(*middleware.AuthUser)
 	if !ok {
@@ -159,5 +165,20 @@ func (handler Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write(result)
+	w.Write(result) // nolint:errcheck
+}
+
+// Ping проверяет соединение с базой данных и возвращает 200 OK в случае успешной проверки
+// В случае наличия проблем с подключением или ошибкой, связанной с превышением времени ожидания ответа,
+// возвращает ошибку 500
+func (handler Handler) Ping(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), handler.App.Config.DatabasePingTimeout)
+	defer cancel()
+	if err := handler.App.DB.Ping(ctx); err != nil {
+		log.Printf("failed to ping database because of %s\n", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("OK")) // nolint:errcheck
 }

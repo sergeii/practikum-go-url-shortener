@@ -134,7 +134,7 @@ func TestFileStorageIsPersistent(t *testing.T) {
 	savedItems := make(map[string]map[string]string)
 	f, _ = os.Open(f.Name())
 	defer f.Close()
-	json.NewDecoder(f).Decode(&savedItems)
+	json.NewDecoder(f).Decode(&savedItems) // nolint:errcheck
 	assert.Equal(t, "https://go.dev", savedItems["foo"]["LongURL"])
 	assert.Equal(t, "", savedItems["foo"]["UserID"])
 	assert.Equal(t, "https://blog.golang.org/", savedItems["bar"]["LongURL"])
@@ -179,7 +179,7 @@ func TestFileStorageIsAbleToStartWithEmptyFile(t *testing.T) {
 
 func TestFileStorageWontStartWithBrokenJSON(t *testing.T) {
 	f, _ := os.CreateTemp("", "*")
-	f.Write([]byte(`{foo: "bar"}`))
+	f.Write([]byte(`{foo: "bar"}`)) // nolint:errcheck
 	f.Close()
 	defer os.Remove(f.Name())
 
@@ -205,6 +205,6 @@ func TestFileStorageDoesNotEscapeHTMLChars(t *testing.T) {
 	savedItems := make(map[string]map[string]string)
 	f, _ = os.Open(f.Name())
 	defer f.Close()
-	json.NewDecoder(f).Decode(&savedItems)
+	json.NewDecoder(f).Decode(&savedItems) // nolint:errcheck
 	assert.Equal(t, "https://yandex.ru/search/?lr=213&text=golang", savedItems["foo"]["LongURL"])
 }

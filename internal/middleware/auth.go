@@ -6,11 +6,12 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
-	"github.com/sergeii/practikum-go-url-shortener/pkg/security/sign"
 	"log"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/sergeii/practikum-go-url-shortener/pkg/security/sign"
 )
 
 type contextKey int
@@ -67,8 +68,7 @@ func authenticateUser(r *http.Request, secretKey []byte) (*AuthUser, error) {
 // и возвращает структуру AuthUser с вновь созданным идентификатором
 func createNewUser() (*AuthUser, error) {
 	randomID := make([]byte, UserIDLength)
-	_, err := rand.Read(randomID)
-	if err != nil {
+	if _, err := rand.Read(randomID); err != nil {
 		log.Printf("unable to generate user id of length %v due to %v\n", UserIDLength, err)
 		return nil, err
 	}

@@ -3,13 +3,6 @@ package handlers_test
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/sergeii/practikum-go-url-shortener/internal/app"
-	"github.com/sergeii/practikum-go-url-shortener/internal/handlers"
-	"github.com/sergeii/practikum-go-url-shortener/internal/middleware"
-	"github.com/sergeii/practikum-go-url-shortener/internal/router"
-	"github.com/sergeii/practikum-go-url-shortener/pkg/security/sign"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -18,6 +11,14 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sergeii/practikum-go-url-shortener/internal/app"
+	"github.com/sergeii/practikum-go-url-shortener/internal/handlers"
+	"github.com/sergeii/practikum-go-url-shortener/internal/middleware"
+	"github.com/sergeii/practikum-go-url-shortener/internal/router"
+	"github.com/sergeii/practikum-go-url-shortener/pkg/security/sign"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func setAuthCookie(r *http.Request, secretKey []byte, userID string) *http.Cookie {
@@ -36,11 +37,11 @@ func setAuthCookie(r *http.Request, secretKey []byte, userID string) *http.Cooki
 	return cookie
 }
 
-func prepareTestServer(cfg *app.Config) (*httptest.Server, func()) {
-	if cfg == nil {
-		cfg = &app.Config{}
+func prepareTestServer(overrides ...app.Override) (*httptest.Server, func()) {
+	shorterner, err := app.New(overrides...)
+	if err != nil {
+		panic(err)
 	}
-	shorterner, _ := app.New(cfg)
 	ts := httptest.NewServer(router.New(shorterner))
 	return ts, func() {
 		ts.Close()
@@ -71,10 +72,11 @@ func TestShortenAndExpandAnyLengthURLs(t *testing.T) {
 	TestURLs := []string{
 		"https://ya.ru",
 		"https://practicum.yandex.ru/learn/go-developer/",
-		"https://www.google.com/search?q=golang&client=safari&ei=k3jbYbeDNMOxrgT-ha3gBA&start=10&sa=N&ved=2ahUKEwj3mPjk8aX1AhXDmIsKHf5CC0wQ8tMDegQIAhA5&biw=1280&bih=630&dpr=2",
+		"https://www.google.com/search?q=golang&client=safari&ei=k3jbYbeDNMOxrgT-ha3gBA&start=10" +
+			"&sa=N&ved=2ahUKEwj3mPjk8aX1AhXDmIsKHf5CC0wQ8tMDegQIAhA5&biw=1280&bih=630&dpr=2",
 	}
 
-	ts, stop := prepareTestServer(nil)
+	ts, stop := prepareTestServer()
 	defer stop()
 	for _, TestURL := range TestURLs {
 		resp, body := doTestRequest(t, ts, http.MethodPost, "/", strings.NewReader(TestURL))
@@ -111,7 +113,7 @@ func TestShortenEndpointUnsupportedHTTPMethods(t *testing.T) {
 		},
 	}
 
-	ts, stop := prepareTestServer(nil)
+	ts, stop := prepareTestServer()
 	defer stop()
 	for _, tt := range tests {
 		t.Run(tt.method, func(t *testing.T) {
@@ -145,7 +147,7 @@ func TestShortenEndpointRequiresURL(t *testing.T) {
 		},
 	}
 
-	ts, stop := prepareTestServer(nil)
+	ts, stop := prepareTestServer()
 	defer stop()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -200,7 +202,10 @@ func TestShortenEndpointSupportsCustomizableBaseURL(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			testBaseURL, _ := url.Parse(tt.configURL)
-			ts, stop := prepareTestServer(&app.Config{BaseURL: testBaseURL})
+			ts, stop := prepareTestServer(func(cfg *app.Config) error {
+				cfg.BaseURL = testBaseURL
+				return nil
+			})
 			defer stop()
 			resp, body := doTestRequest(t, ts, http.MethodPost, "/", strings.NewReader("https://ya.ru/"))
 			resp.Body.Close()
@@ -213,7 +218,8 @@ func TestAPIShortenAndExpandURLs(t *testing.T) {
 	TestURLs := []string{
 		"https://ya.ru",
 		"https://practicum.yandex.ru/learn/go-developer/",
-		"https://www.google.com/search?q=golang&client=safari&ei=k3jbYbeDNMOxrgT-ha3gBA&start=10&sa=N&ved=2ahUKEwj3mPjk8aX1AhXDmIsKHf5CC0wQ8tMDegQIAhA5&biw=1280&bih=630&dpr=2",
+		"https://www.google.com/search?q=golang&client=safari&ei=k3jbYbeDNMOxrgT-ha3gBA" +
+			"&start=10&sa=N&ved=2ahUKEwj3mPjk8aX1AhXDmIsKHf5CC0wQ8tMDegQIAhA5&biw=1280&bih=630&dpr=2",
 	}
 
 	type ShortenReqBody struct {
@@ -223,10 +229,10 @@ func TestAPIShortenAndExpandURLs(t *testing.T) {
 		Result string `json:"result"`
 	}
 
-	ts, stop := prepareTestServer(nil)
+	ts, stop := prepareTestServer()
 	defer stop()
 	for _, TestURL := range TestURLs {
-		reqJSON, _ := json.Marshal(&ShortenReqBody{URL: TestURL})
+		reqJSON, _ := json.Marshal(&ShortenReqBody{URL: TestURL}) // nolint:errchkjson
 		resp, body := doTestRequest(t, ts, http.MethodPost, "/api/shorten", bytes.NewReader(reqJSON))
 		resp.Body.Close()
 
@@ -235,7 +241,7 @@ func TestAPIShortenAndExpandURLs(t *testing.T) {
 
 		// Получаем относительный url, состоящий из 7 символов, и пробуем перейти по нему
 		var resultJSON ShortenResultBody
-		json.Unmarshal([]byte(body), &resultJSON)
+		json.Unmarshal([]byte(body), &resultJSON) // nolint:errcheck
 		parsed, _ := url.Parse(resultJSON.Result)
 		assert.Len(t, strings.Trim(parsed.Path, "/"), 7)
 		resp, _ = doTestRequest(t, ts, http.MethodGet, parsed.Path, nil)
@@ -265,7 +271,7 @@ func TestAPIShortenURLUnsupportedHTTPMethods(t *testing.T) {
 		},
 	}
 
-	ts, stop := prepareTestServer(nil)
+	ts, stop := prepareTestServer()
 	defer stop()
 	for _, tt := range tests {
 		t.Run(tt.method, func(t *testing.T) {
@@ -324,7 +330,7 @@ func TestAPIShortenEndpointRequiresValidJSON(t *testing.T) {
 		},
 	}
 
-	ts, stop := prepareTestServer(nil)
+	ts, stop := prepareTestServer()
 	defer stop()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -340,7 +346,7 @@ func TestAPIShortenEndpointRequiresValidJSON(t *testing.T) {
 }
 
 func TestExpandEndpointRequiresShortURLID(t *testing.T) {
-	ts, stop := prepareTestServer(nil)
+	ts, stop := prepareTestServer()
 	defer stop()
 	resp, _ := doTestRequest(t, ts, http.MethodGet, "/", nil)
 	resp.Body.Close()
@@ -374,7 +380,7 @@ func TestExpandEndpointRequiresProperID(t *testing.T) {
 		},
 	}
 
-	shorterner, _ := app.New(&app.Config{})
+	shorterner, _ := app.New()
 	shorterner.Storage.Set("gogogo", "https://go.dev/", "")
 	ts := httptest.NewServer(router.New(shorterner))
 	defer ts.Close()
@@ -395,7 +401,7 @@ func TestExpandEndpointRequiresProperID(t *testing.T) {
 }
 
 func TestSetAndGetUserURLS(t *testing.T) {
-	shorterner, _ := app.New(&app.Config{})
+	shorterner, _ := app.New()
 	ts := httptest.NewServer(router.New(shorterner))
 	defer ts.Close()
 	defer shorterner.Close()
@@ -416,7 +422,7 @@ func TestSetAndGetUserURLS(t *testing.T) {
 	body, _ := ioutil.ReadAll(resp.Body)
 	resp.Body.Close()
 	jsonItems := make([]handlers.APIUserURLItem, 0)
-	json.Unmarshal(body, &jsonItems)
+	json.Unmarshal(body, &jsonItems) // nolint:errcheck
 	longUserURLs := make([]string, 0)
 	for _, item := range jsonItems {
 		longUserURLs = append(longUserURLs, item.OriginalURL)
@@ -453,7 +459,7 @@ func TestGetUserURLs(t *testing.T) {
 		},
 	}
 
-	shorterner, _ := app.New(&app.Config{})
+	shorterner, _ := app.New()
 	shorterner.Storage.Set("go", "https://go.dev/", "user1")
 	shorterner.Storage.Set("ya", "https://ya.ru/", "user1")
 	shorterner.Storage.Set("imdb", "https://www.imdb.com/", "user2")
@@ -474,7 +480,7 @@ func TestGetUserURLs(t *testing.T) {
 				assert.Equal(t, 204, resp.StatusCode)
 			} else {
 				jsonItems := make([]handlers.APIUserURLItem, 0)
-				json.Unmarshal(body, &jsonItems)
+				json.Unmarshal(body, &jsonItems) // nolint:errcheck
 				userShortURLs := make([]string, 0)
 				for _, item := range jsonItems {
 					u, _ := url.Parse(item.ShortURL)
@@ -485,4 +491,23 @@ func TestGetUserURLs(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPingEndpointNotOK(t *testing.T) {
+	shorterner, _ := app.New()
+	ts := httptest.NewServer(router.New(shorterner))
+	defer ts.Close()
+	defer shorterner.Close()
+	shorterner.DB.Close()
+	resp, _ := doTestRequest(t, ts, http.MethodGet, "/ping", nil)
+	resp.Body.Close()
+	assert.Equal(t, 500, resp.StatusCode)
+}
+
+func TestPingEndpointOK(t *testing.T) {
+	ts, stop := prepareTestServer()
+	defer stop()
+	resp, _ := doTestRequest(t, ts, http.MethodGet, "/ping", nil)
+	resp.Body.Close()
+	assert.Equal(t, 200, resp.StatusCode)
 }

@@ -3,26 +3,27 @@ package middleware_test
 import (
 	"bytes"
 	"compress/gzip"
-	"github.com/sergeii/practikum-go-url-shortener/internal/middleware"
-	mwtest "github.com/sergeii/practikum-go-url-shortener/pkg/testing/middleware"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"io"
 	"io/ioutil"
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/sergeii/practikum-go-url-shortener/internal/middleware"
+	mwtest "github.com/sergeii/practikum-go-url-shortener/pkg/testing/middleware"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func HelloNameHandler(w http.ResponseWriter, r *http.Request) {
 	name, _ := io.ReadAll(r.Body)
-	w.Write([]byte("Hello, " + string(name)))
+	w.Write([]byte("Hello, " + string(name))) // nolint:errcheck
 }
 
 func gzipBuffer(payload []byte) *bytes.Buffer {
 	var b bytes.Buffer
 	writer := gzip.NewWriter(&b)
-	writer.Write(payload)
+	writer.Write(payload) // nolint:errcheck
 	writer.Close()
 	return &b
 }

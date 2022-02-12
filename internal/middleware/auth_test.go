@@ -6,22 +6,23 @@ import (
 	"crypto/sha256"
 	"encoding/base32"
 	"encoding/base64"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
 	"github.com/sergeii/practikum-go-url-shortener/internal/app"
 	"github.com/sergeii/practikum-go-url-shortener/internal/middleware"
 	mwtest "github.com/sergeii/practikum-go-url-shortener/pkg/testing/middleware"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"net/http"
-	"net/http/httptest"
-	"strings"
-	"testing"
 )
 
 func HelloIDHandler(w http.ResponseWriter, r *http.Request) {
 	if user, ok := r.Context().Value(middleware.AuthContextKey).(*middleware.AuthUser); ok {
-		w.Write([]byte("Hello, " + user.ID))
+		w.Write([]byte("Hello, " + user.ID)) // nolint:errcheck
 	} else {
-		w.Write([]byte("Hello, anonymous"))
+		w.Write([]byte("Hello, anonymous")) // nolint:errcheck
 	}
 }
 

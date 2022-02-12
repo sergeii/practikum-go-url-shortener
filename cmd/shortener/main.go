@@ -1,29 +1,20 @@
 package main
 
 import (
+	"log"
+	"net/http"
+
 	"github.com/sergeii/practikum-go-url-shortener/internal/app"
 	"github.com/sergeii/practikum-go-url-shortener/internal/router"
 	"github.com/sergeii/practikum-go-url-shortener/pkg/http/server"
-	"log"
-	"net/http"
 )
 
 func main() {
-	// Собираем настройки сервиса из аргументов командной строки и переменных окружения
-	cfg, err := ConfigureSettings()
-	if err != nil {
-		log.Fatalf("failed to init config due to %s\n", err)
-	}
-
-	shortener, err := app.New(cfg)
+	shortener, err := app.New(useFlags)
 	if err != nil {
 		log.Fatalf("failed to init app due to %s\n", err)
 	}
-	defer func() {
-		if err := shortener.Close(); err != nil {
-			log.Printf("failed to clean up app due to %s\n", err)
-		}
-	}()
+	defer shortener.Close()
 
 	rtr := router.New(shortener)
 	svr := &http.Server{
@@ -32,6 +23,6 @@ func main() {
 	}
 	err = server.Start(svr, server.WithShutdownTimeout(shortener.Config.ServerShutdownTimeout))
 	if err != nil {
-		log.Fatalf("Server exited prematurely: %s\n", err)
+		log.Printf("Server exited prematurely: %s\n", err)
 	}
 }
