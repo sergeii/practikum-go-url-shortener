@@ -12,14 +12,10 @@ services:
       - /var/lib/postgresql/data
     environment:
       - POSTGRES_INITDB_ARGS=--nosync
-      - POSTGRES_USER=shortener
-      - POSTGRES_DB=shortener
+      - POSTGRES_DB=praktikum
       - POSTGRES_HOST_AUTH_METHOD=trust
     command: >
       postgres
-        -c fsync=off
-        -c synchronous_commit=off
-        -c full_page_writes=off
         -c log_statement=none
         -c logging_collector=off
         -c log_min_duration_statement=-1

@@ -25,7 +25,7 @@ type Config struct {
 	ServerShutdownTimeout time.Duration `env:"SERVER_SHUTDOWN_TIMEOUT" envDefault:"5s"`
 	FileStoragePath       string        `env:"FILE_STORAGE_PATH"`
 	SecretKey             string        `env:"SECRET_KEY"`
-	DatabaseDSN           string        `env:"DATABASE_DSN" envDefault:"postgres://shortener:shortener@localhost:5432/shortener"` // nolint:lll
+	DatabaseDSN           string        `env:"DATABASE_DSN" envDefault:"postgres://postgres:postgres@postgres:5432/praktikum"` // nolint:lll
 	DatabasePingTimeout   time.Duration `env:"DATABASE_PING_TIMEOUT" envDefault:"5s"`
 }
 
