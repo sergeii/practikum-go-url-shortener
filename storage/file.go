@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -47,11 +48,12 @@ func NewFileURLStorerBackend(filename string) (*FileURLStorerBackend, error) {
 	return &FileURLStorerBackend{filename, cache}, nil
 }
 
-func (backend FileURLStorerBackend) Set(shortURLID, longURL, userID string) {
+func (backend FileURLStorerBackend) Set(ctx context.Context, shortURLID, longURL, userID string) error {
 	backend.cache[shortURLID] = FileURLItem{longURL, userID}
+	return nil
 }
 
-func (backend FileURLStorerBackend) Get(shortURLID string) (string, error) {
+func (backend FileURLStorerBackend) Get(ctx context.Context, shortURLID string) (string, error) {
 	item, found := backend.cache[shortURLID]
 	if !found {
 		return "", ErrURLNotFound
@@ -59,17 +61,17 @@ func (backend FileURLStorerBackend) Get(shortURLID string) (string, error) {
 	return item.LongURL, nil
 }
 
-func (backend FileURLStorerBackend) GetURLsByUserID(userID string) map[string]string {
+func (backend FileURLStorerBackend) GetURLsByUserID(ctx context.Context, userID string) (map[string]string, error) {
 	items := make(map[string]string)
 	if userID == "" {
-		return items
+		return items, nil
 	}
 	for shortURL, item := range backend.cache {
 		if item.UserID == userID {
 			items[shortURL] = item.LongURL
 		}
 	}
-	return items
+	return items, nil
 }
 
 func (backend FileURLStorerBackend) Close() error {

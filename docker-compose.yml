@@ -12,7 +12,8 @@ services:
       - /var/lib/postgresql/data
     environment:
       - POSTGRES_INITDB_ARGS=--nosync
-      - POSTGRES_DB=praktikum
+      - POSTGRES_USER=shortener
+      - POSTGRES_DB=shortener
       - POSTGRES_HOST_AUTH_METHOD=trust
     command: >
       postgres

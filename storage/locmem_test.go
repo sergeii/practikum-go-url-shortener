@@ -1,6 +1,7 @@
 package storage_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/sergeii/practikum-go-url-shortener/storage"
@@ -8,16 +9,17 @@ import (
 )
 
 func TestSaveURLToLocmemStorage(t *testing.T) {
+	ctx := context.TODO()
 	theStorage := storage.NewLocmemURLStorerBackend()
 
-	theStorage.Set("foo", "https://practicum.yandex.ru/", "")
+	theStorage.Set(ctx, "foo", "https://practicum.yandex.ru/", "") // nolint: errcheck
 	assert.Equal(t, "https://practicum.yandex.ru/", theStorage.Storage["foo"].LongURL)
 	// Можем перезаписать
-	theStorage.Set("foo", "https://go.dev/", "")
+	theStorage.Set(ctx, "foo", "https://go.dev/", "") // nolint: errcheck
 	assert.Equal(t, "https://go.dev/", theStorage.Storage["foo"].LongURL)
 
 	// Или записать с другим id
-	theStorage.Set("bar", "https://example.com/", "user1")
+	theStorage.Set(ctx, "bar", "https://example.com/", "user1") // nolint: errcheck
 	assert.Equal(t, "https://go.dev/", theStorage.Storage["foo"].LongURL)
 	assert.Equal(t, "", theStorage.Storage["foo"].UserID)
 	assert.Equal(t, "https://example.com/", theStorage.Storage["bar"].LongURL)
@@ -50,12 +52,13 @@ func TestGetURLFromLocmemStorage(t *testing.T) {
 			result: "",
 		},
 	}
+	ctx := context.TODO()
 	theStorage := storage.NewLocmemURLStorerBackend()
-	theStorage.Set("foo", "https://practicum.yandex.ru/", "")
+	theStorage.Set(ctx, "foo", "https://practicum.yandex.ru/", "") // nolint: errcheck
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			longURL, err := theStorage.Get(tt.key)
+			longURL, err := theStorage.Get(ctx, tt.key)
 			if tt.isErr {
 				assert.Error(t, err)
 				assert.Equal(t, "", longURL)
@@ -68,23 +71,24 @@ func TestGetURLFromLocmemStorage(t *testing.T) {
 }
 
 func TestGetUserURLsFromLocmemStorage(t *testing.T) {
+	ctx := context.TODO()
 	theStorage := storage.NewLocmemURLStorerBackend()
 	user1, user2 := "user1", "user2"
 
-	theStorage.Set("foo", "https://practicum.yandex.ru/", user1)
-	theStorage.Set("bar", "https://go.dev/", user1)
-	theStorage.Set("baz", "https://google.com/", user2)
-	theStorage.Set("ham", "https://google.com/", "")
+	theStorage.Set(ctx, "foo", "https://practicum.yandex.ru/", user1) // nolint: errcheck
+	theStorage.Set(ctx, "bar", "https://go.dev/", user1)              // nolint: errcheck
+	theStorage.Set(ctx, "baz", "https://google.com/", user2)          // nolint: errcheck
+	theStorage.Set(ctx, "ham", "https://google.com/", "")             // nolint: errcheck
 
-	user1Items := theStorage.GetURLsByUserID(user1)
+	user1Items, _ := theStorage.GetURLsByUserID(ctx, user1)
 	assert.Len(t, user1Items, 2)
 	assert.Contains(t, user1Items, "foo")
 	assert.Contains(t, user1Items, "bar")
 
-	user2Items := theStorage.GetURLsByUserID(user2)
+	user2Items, _ := theStorage.GetURLsByUserID(ctx, user2)
 	assert.Len(t, user2Items, 1)
 	assert.Contains(t, user2Items, "baz")
 
-	emptyUserItems := theStorage.GetURLsByUserID("")
+	emptyUserItems, _ := theStorage.GetURLsByUserID(ctx, "")
 	assert.Len(t, emptyUserItems, 0)
 }

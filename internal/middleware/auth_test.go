@@ -3,6 +3,7 @@ package middleware_test
 import (
 	"bytes"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base32"
 	"encoding/base64"
@@ -11,12 +12,17 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sergeii/practikum-go-url-shortener/internal/app"
 	"github.com/sergeii/practikum-go-url-shortener/internal/middleware"
 	mwtest "github.com/sergeii/practikum-go-url-shortener/pkg/testing/middleware"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func generateSecret() []byte {
+	randKey := make([]byte, 32)
+	rand.Read(randKey) // nolint:errcheck
+	return randKey
+}
 
 func HelloIDHandler(w http.ResponseWriter, r *http.Request) {
 	if user, ok := r.Context().Value(middleware.AuthContextKey).(*middleware.AuthUser); ok {
@@ -27,7 +33,7 @@ func HelloIDHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func TestNewAuthCookieIsSet(t *testing.T) {
-	secretKey, _ := app.GenerateSecretKey(32)
+	secretKey := generateSecret()
 	req, _ := http.NewRequest("POST", "/", nil)
 	rr := mwtest.RequestWithMiddleware(HelloIDHandler, middleware.WithAuthentication(secretKey), req)
 
@@ -41,7 +47,7 @@ func TestNewAuthCookieIsSet(t *testing.T) {
 }
 
 func TestPreviousAuthCookieIsAccepted(t *testing.T) {
-	secretKey, _ := app.GenerateSecretKey(32)
+	secretKey := generateSecret()
 	userID := "deadbeef"
 	cookieValue := generateAuthCookie(userID, secretKey)
 	req, _ := http.NewRequest("POST", "/", nil)
@@ -54,8 +60,8 @@ func TestPreviousAuthCookieIsAccepted(t *testing.T) {
 }
 
 func TestInvalidAuthCookieIsIgnoredNewIsSet(t *testing.T) {
-	secretKey, _ := app.GenerateSecretKey(32)
-	fakeSecretKey, _ := app.GenerateSecretKey(32)
+	secretKey := generateSecret()
+	fakeSecretKey := generateSecret()
 	tests := []struct {
 		name    string
 		cookie  *http.Cookie

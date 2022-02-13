@@ -20,13 +20,14 @@ import (
 const SecretKeyLength = 32
 
 type Config struct {
-	BaseURL               *url.URL      `env:"BASE_URL"`
-	ServerAddress         string        `env:"SERVER_ADDRESS" envDefault:"localhost:8080"`
-	ServerShutdownTimeout time.Duration `env:"SERVER_SHUTDOWN_TIMEOUT" envDefault:"5s"`
-	FileStoragePath       string        `env:"FILE_STORAGE_PATH"`
-	SecretKey             string        `env:"SECRET_KEY"`
-	DatabaseDSN           string        `env:"DATABASE_DSN" envDefault:"postgres://postgres:postgres@postgres:5432/praktikum"` // nolint:lll
-	DatabasePingTimeout   time.Duration `env:"DATABASE_PING_TIMEOUT" envDefault:"5s"`
+	BaseURL                *url.URL      `env:"BASE_URL"`
+	ServerAddress          string        `env:"SERVER_ADDRESS" envDefault:"localhost:8080"`
+	ServerShutdownTimeout  time.Duration `env:"SERVER_SHUTDOWN_TIMEOUT" envDefault:"5s"`
+	FileStoragePath        string        `env:"FILE_STORAGE_PATH"`
+	SecretKey              string        `env:"SECRET_KEY"`
+	DatabaseDSN            string        `env:"DATABASE_DSN" envDefault:"postgres://shortener:shortener@localhost:5432/shortener"` // nolint:lll
+	DatabaseConnectTimeout time.Duration `env:"DATABASE_CONNECT_TIMEOUT" envDefault:"1s"`
+	DatabaseQueryTimeout   time.Duration `env:"DATABASE_QUERY_TIMEOUT" envDefault:"1s"`
 }
 
 type App struct {
@@ -52,7 +53,14 @@ func New(overrides ...Override) (*App, error) {
 		}
 	}
 
-	store, err := configureStorage(&cfg)
+	db, err := configureDatabase(&cfg)
+	if err != nil {
+		return nil, fmt.Errorf("unable to configure database due to %w", err)
+	} else if db == nil {
+		log.Println("starting without db because connection failed")
+	}
+
+	store, err := configureStorage(&cfg, db)
 	if err != nil {
 		return nil, fmt.Errorf("unable to configure storage due to %w", err)
 	}
@@ -60,11 +68,6 @@ func New(overrides ...Override) (*App, error) {
 	secretKey, err := configureSecretKey(&cfg)
 	if err != nil {
 		return nil, fmt.Errorf("unable to configure secret key due to %w", err)
-	}
-
-	db, err := ConfigureDatabase(&cfg)
-	if err != nil {
-		return nil, fmt.Errorf("unable to configure database due to %w", err)
 	}
 
 	app := &App{
@@ -81,12 +84,17 @@ func (app *App) Close() {
 	if err := app.Storage.Close(); err != nil {
 		log.Printf("failed to close storage %s due to %s; possible data loss", app.Storage, err)
 	}
-	app.DB.Close()
+	if app.DB != nil {
+		app.DB.Close()
+	}
 }
 
 // configureStorage инициализирует тип хранилища
 // в зависимости от настроек сервиса, заданных переменными окружения
-func configureStorage(cfg *Config) (storage.URLStorer, error) {
+func configureStorage(cfg *Config, db *pgxpool.Pool) (storage.URLStorer, error) {
+	if db != nil {
+		return storage.NewDatabaseURLStorerBackend(db, cfg.DatabaseQueryTimeout)
+	}
 	if cfg.FileStoragePath != "" {
 		return storage.NewFileURLStorerBackend(cfg.FileStoragePath)
 	}
@@ -104,17 +112,21 @@ func configureSecretKey(cfg *Config) ([]byte, error) {
 		}
 		return confKey, nil
 	}
-	return GenerateSecretKey(SecretKeyLength)
-}
-
-func GenerateSecretKey(length int) ([]byte, error) {
-	randKey := make([]byte, length)
+	randKey := make([]byte, SecretKeyLength)
 	if _, err := rand.Read(randKey); err != nil {
 		return nil, err
 	}
 	return randKey, nil
 }
 
-func ConfigureDatabase(cfg *Config) (*pgxpool.Pool, error) {
-	return pgxpool.Connect(context.Background(), cfg.DatabaseDSN)
+// nolint: unparam
+func configureDatabase(cfg *Config) (*pgxpool.Pool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.DatabaseConnectTimeout)
+	defer cancel()
+	db, err := pgxpool.Connect(ctx, cfg.DatabaseDSN)
+	// база данных доступна не всегда, поэтому допускаем работу приложения без бд
+	if err != nil {
+		return nil, nil // nolint:nilerr, nilnil
+	}
+	return db, nil
 }

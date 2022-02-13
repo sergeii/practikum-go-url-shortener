@@ -45,15 +45,14 @@ func (handler Handler) constructShortURL(shortID string, r *http.Request) *url.U
 
 func (handler Handler) shortenAndSaveLongURL(longURL string, r *http.Request) (*url.URL, error) {
 	var userID string
-	if longURL == "" {
-		return nil, errors.New("please provide a url to shorten")
-	}
 	if user, ok := r.Context().Value(middleware.AuthContextKey).(*middleware.AuthUser); ok {
 		userID = user.ID
 	}
 	// Получаем короткий идентификатор для ссылки и кладем пару в хранилище
 	shortID := handler.App.Hasher.Hash(longURL)
-	handler.App.Storage.Set(shortID, longURL, userID)
+	if err := handler.App.Storage.Set(r.Context(), shortID, longURL, userID); err != nil {
+		return nil, err
+	}
 	shortURL := handler.constructShortURL(shortID, r)
 	return shortURL, nil
 }
@@ -65,11 +64,16 @@ func (handler Handler) shortenAndSaveLongURL(longURL string, r *http.Request) (*
 func (handler Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	// Пытаемся получить длинный url из тела запроса
+	longURL := string(body)
+	if longURL == "" {
+		http.Error(w, "please provide a url to shorten", http.StatusBadRequest)
+		return
+	}
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	shortURL, err := handler.shortenAndSaveLongURL(string(body), r)
+	shortURL, err := handler.shortenAndSaveLongURL(longURL, r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -89,7 +93,7 @@ func (handler Handler) ExpandURL(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid short url", http.StatusBadRequest)
 		return
 	}
-	longURL, err := handler.App.Storage.Get(shortURLID)
+	longURL, err := handler.App.Storage.Get(r.Context(), shortURLID)
 	if err != nil {
 		if errors.Is(err, storage.ErrURLNotFound) {
 			// Короткая ссылка не найдена в хранилище - ожидаемое поведение, возвращаем 404
@@ -114,11 +118,15 @@ func (handler Handler) APIShortenURL(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	// Значение параметра невалидно
+	if shortenReq.URL == "" {
+		http.Error(w, "please provide a url to shorten", http.StatusBadRequest)
+		return
+	}
 
 	shortURL, err := handler.shortenAndSaveLongURL(shortenReq.URL, r)
-	// Значение параметра невалидно
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -128,6 +136,7 @@ func (handler Handler) APIShortenURL(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	w.Write(respBody) // nolint:errcheck
@@ -142,8 +151,12 @@ func (handler Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not authenticated", http.StatusForbidden)
 		return
 	}
-	items := handler.App.Storage.GetURLsByUserID(user.ID)
-	// Не найдено ни одной ссылки для текущего пользователя
+	items, err := handler.App.Storage.GetURLsByUserID(r.Context(), user.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// Не найдено ни одной ссылки для текущего пользователя - возвращаем 204
 	if len(items) == 0 {
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -172,7 +185,11 @@ func (handler Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 // В случае наличия проблем с подключением или ошибкой, связанной с превышением времени ожидания ответа,
 // возвращает ошибку 500
 func (handler Handler) Ping(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), handler.App.Config.DatabasePingTimeout)
+	if handler.App.DB == nil {
+		http.Error(w, "database is not available", http.StatusInternalServerError)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), handler.App.Config.DatabaseConnectTimeout)
 	defer cancel()
 	if err := handler.App.DB.Ping(ctx); err != nil {
 		log.Printf("failed to ping database because of %s\n", err)

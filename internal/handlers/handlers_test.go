@@ -2,6 +2,7 @@ package handlers_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"io/ioutil"
@@ -381,7 +382,7 @@ func TestExpandEndpointRequiresProperID(t *testing.T) {
 	}
 
 	shorterner, _ := app.New()
-	shorterner.Storage.Set("gogogo", "https://go.dev/", "")
+	shorterner.Storage.Set(context.TODO(), "gogogo", "https://go.dev/", "") // nolint: errcheck
 	ts := httptest.NewServer(router.New(shorterner))
 	defer ts.Close()
 	defer shorterner.Close()
@@ -459,10 +460,11 @@ func TestGetUserURLs(t *testing.T) {
 		},
 	}
 
+	ctx := context.TODO()
 	shorterner, _ := app.New()
-	shorterner.Storage.Set("go", "https://go.dev/", "user1")
-	shorterner.Storage.Set("ya", "https://ya.ru/", "user1")
-	shorterner.Storage.Set("imdb", "https://www.imdb.com/", "user2")
+	shorterner.Storage.Set(ctx, "go", "https://go.dev/", "user1")         // nolint: errcheck
+	shorterner.Storage.Set(ctx, "ya", "https://ya.ru/", "user1")          // nolint: errcheck
+	shorterner.Storage.Set(ctx, "imdb", "https://www.imdb.com/", "user2") // nolint: errcheck
 	ts := httptest.NewServer(router.New(shorterner))
 	defer ts.Close()
 	defer shorterner.Close()
@@ -493,21 +495,31 @@ func TestGetUserURLs(t *testing.T) {
 	}
 }
 
+func TestPingEndpointOK(t *testing.T) {
+	shorterner, _ := app.New()
+	defer shorterner.Close()
+
+	if shorterner.DB == nil {
+		t.Skip("Skipping test because db is not configured")
+	}
+
+	ts := httptest.NewServer(router.New(shorterner))
+	defer ts.Close()
+
+	resp, _ := doTestRequest(t, ts, http.MethodGet, "/ping", nil)
+	resp.Body.Close()
+	assert.Equal(t, 200, resp.StatusCode)
+}
+
 func TestPingEndpointNotOK(t *testing.T) {
 	shorterner, _ := app.New()
 	ts := httptest.NewServer(router.New(shorterner))
 	defer ts.Close()
 	defer shorterner.Close()
-	shorterner.DB.Close()
+	if shorterner.DB != nil {
+		shorterner.DB.Close()
+	}
 	resp, _ := doTestRequest(t, ts, http.MethodGet, "/ping", nil)
 	resp.Body.Close()
 	assert.Equal(t, 500, resp.StatusCode)
-}
-
-func TestPingEndpointOK(t *testing.T) {
-	ts, stop := prepareTestServer()
-	defer stop()
-	resp, _ := doTestRequest(t, ts, http.MethodGet, "/ping", nil)
-	resp.Body.Close()
-	assert.Equal(t, 200, resp.StatusCode)
 }
