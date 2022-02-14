@@ -496,3 +496,71 @@ func TestPingEndpointNotOK(t *testing.T) {
 	resp.Body.Close()
 	assert.Equal(t, 500, resp.StatusCode)
 }
+
+func TestAPIShortenBatchRequest(t *testing.T) {
+	ts, _ := prepareTestServer(t)
+
+	TestURLs := map[string]string{
+		"foo": "https://ya.ru",
+		"bar": "https://practicum.yandex.ru/learn/go-developer/",
+		"baz": "https://ya.ru",
+		"ham": "https://www.google.com/search?q=golang&client=safari&ei=k3jbYbeDNMOxrgT-ha3gBA" +
+			"&start=10&sa=N&ved=2ahUKEwj3mPjk8aX1AhXDmIsKHf5CC0wQ8tMDegQIAhA5&biw=1280&bih=630&dpr=2",
+		"eggs": "",
+	}
+
+	reqItems := make([]handlers.APIShortenBatchRequestItem, 0, len(TestURLs))
+	for corrID, URL := range TestURLs {
+		reqItems = append(reqItems, handlers.APIShortenBatchRequestItem{CorrelationID: corrID, OriginalURL: URL})
+	}
+	reqJSON, _ := json.Marshal(&reqItems) // nolint:errchkjson
+	resp, body := doTestRequest(t, ts, http.MethodPost, "/api/shorten/batch", bytes.NewReader(reqJSON))
+	resp.Body.Close()
+
+	respItems := make([]handlers.APIShortenBatchResultItem, 0)
+	json.Unmarshal([]byte(body), &respItems) // nolint:errcheck
+	resultURLs := make(map[string]string)
+	for _, item := range respItems {
+		resultURLs[item.CorrelationID] = item.ShortURL
+	}
+
+	require.Equal(t, 201, resp.StatusCode)
+	assert.Len(t, respItems, 4)
+	assert.Len(t, resultURLs, 4)
+	assert.Contains(t, resultURLs, "foo")
+	assert.Contains(t, resultURLs, "bar")
+	assert.Contains(t, resultURLs, "baz")
+	assert.Contains(t, resultURLs, "ham")
+
+	assert.Equal(t, resultURLs["foo"], resultURLs["baz"])
+	parsed, _ := url.Parse(resultURLs["baz"])
+	resp, _ = doTestRequest(t, ts, http.MethodGet, parsed.Path, nil)
+	resp.Body.Close()
+	// Получем ожидаем редирект на оригинальный url
+	assert.Equal(t, 307, resp.StatusCode)
+	assert.Equal(t, "https://ya.ru", resp.Header.Get("Location"))
+}
+
+func TestAPIShortenBatchEmptyBody(t *testing.T) {
+	ts, _ := prepareTestServer(t)
+	resp, _ := doTestRequest(t, ts, http.MethodPost, "/api/shorten/batch", strings.NewReader("[]"))
+	resp.Body.Close()
+	require.Equal(t, 400, resp.StatusCode)
+}
+
+func TestAPIShortenBatchNoItemsToProcess(t *testing.T) {
+	ts, _ := prepareTestServer(t)
+	TestURLs := map[string]string{
+		"foo": "",
+		"bar": "",
+	}
+
+	reqItems := make([]handlers.APIShortenBatchRequestItem, 0, len(TestURLs))
+	for corrID, URL := range TestURLs {
+		reqItems = append(reqItems, handlers.APIShortenBatchRequestItem{CorrelationID: corrID, OriginalURL: URL})
+	}
+	reqJSON, _ := json.Marshal(&reqItems) // nolint:errchkjson
+	resp, _ := doTestRequest(t, ts, http.MethodPost, "/api/shorten/batch", bytes.NewReader(reqJSON))
+	resp.Body.Close()
+	require.Equal(t, 400, resp.StatusCode)
+}

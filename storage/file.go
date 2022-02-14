@@ -75,6 +75,9 @@ func (backend FileURLStorerBackend) GetURLsByUserID(ctx context.Context, userID 
 }
 
 func (backend FileURLStorerBackend) SaveBatch(ctx context.Context, items []BatchItem) error {
+	for _, item := range items {
+		backend.cache[item.ShortID] = FileURLItem{item.LongURL, item.UserID}
+	}
 	return nil
 }
 

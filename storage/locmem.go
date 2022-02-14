@@ -43,6 +43,9 @@ func (backend LocmemURLStorerBackend) GetURLsByUserID(ctx context.Context, userI
 }
 
 func (backend LocmemURLStorerBackend) SaveBatch(ctx context.Context, items []BatchItem) error {
+	for _, item := range items {
+		backend.Storage[item.ShortID] = LocURLItem{item.LongURL, item.UserID}
+	}
 	return nil
 }
 

@@ -222,5 +222,5 @@ func (handler Handler) APIShortenBatch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	resp.JSONResponse(&shortenBatchRes, w, http.StatusOK)
+	resp.JSONResponse(&shortenBatchRes, w, http.StatusCreated)
 }
