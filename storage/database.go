@@ -102,6 +102,42 @@ func (backend DatabaseURLStorerBackend) GetURLsByUserID(ctx context.Context, use
 	return items, nil
 }
 
+func (backend DatabaseURLStorerBackend) SaveBatch(ctx context.Context, items []BatchItem) error {
+	tx, err := backend.DB.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func(ctx context.Context) {
+		err := tx.Rollback(ctx)
+		if err != nil {
+			log.Printf("failed to rollback transaction due to %v", err)
+		}
+	}(ctx)
+
+	preparedSQL := "INSERT INTO urls (short_id, original_url, user_id) VALUES($1,$2,$3) " +
+		"ON CONFLICT ON CONSTRAINT urls_short_url_uniq_for_user DO " +
+		"UPDATE SET original_url = EXCLUDED.original_url"
+	if _, err := tx.Prepare(ctx, "batch", preparedSQL); err != nil {
+		return err
+	}
+
+	for _, item := range items {
+		if _, err = tx.Exec(ctx, "batch", item.ShortID, item.LongURL, item.UserID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+func (backend DatabaseURLStorerBackend) Cleanup() {
+	// Подчищаем таблицу с урлами между тестами
+	ctx, cancel := context.WithTimeout(context.Background(), backend.timeout)
+	defer cancel()
+	if _, err := backend.DB.Exec(ctx, "TRUNCATE TABLE urls"); err != nil {
+		panic(err)
+	}
+}
+
 func (backend DatabaseURLStorerBackend) Close() error {
 	// соединение к бд закрывается на уровне приложения
 	return nil

@@ -27,6 +27,7 @@ func New(theApp *app.App) chi.Router {
 	})
 	router.Route("/api", func(r chi.Router) {
 		r.Post("/shorten", handler.APIShortenURL)
+		r.Post("/shorten/batch", handler.APIShortenBatch)
 	})
 	return router
 }

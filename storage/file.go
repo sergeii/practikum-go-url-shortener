@@ -74,6 +74,14 @@ func (backend FileURLStorerBackend) GetURLsByUserID(ctx context.Context, userID 
 	return items, nil
 }
 
+func (backend FileURLStorerBackend) SaveBatch(ctx context.Context, items []BatchItem) error {
+	return nil
+}
+
+func (backend FileURLStorerBackend) Cleanup() {
+	// do nothing
+}
+
 func (backend FileURLStorerBackend) Close() error {
 	// Сохраняем на диск рабочий кэш со ссылками,
 	// который будет использован при следующем старте программы

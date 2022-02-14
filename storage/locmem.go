@@ -42,6 +42,14 @@ func (backend LocmemURLStorerBackend) GetURLsByUserID(ctx context.Context, userI
 	return items, nil
 }
 
+func (backend LocmemURLStorerBackend) SaveBatch(ctx context.Context, items []BatchItem) error {
+	return nil
+}
+
+func (backend LocmemURLStorerBackend) Cleanup() {
+	// do nothing
+}
+
 func (backend LocmemURLStorerBackend) Close() error {
 	// do nothing
 	return nil

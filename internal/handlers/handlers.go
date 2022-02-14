@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/sergeii/practikum-go-url-shortener/pkg/http/resp"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/sergeii/practikum-go-url-shortener/internal/app"
 	"github.com/sergeii/practikum-go-url-shortener/internal/middleware"
@@ -130,16 +132,8 @@ func (handler Handler) APIShortenURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respBody, err := json.Marshal(&APIShortenResult{Result: shortURL.String()})
-	// Не удалось серилизовать json по некой очень редкой проблеме
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	w.Write(respBody) // nolint:errcheck
+	resultItem := APIShortenResult{Result: shortURL.String()}
+	resp.JSONResponse(&resultItem, w, http.StatusCreated)
 }
 
 // GetUserURLs возвращает полный список всех ссылок, сокращенных текущим пользователем.
@@ -170,15 +164,7 @@ func (handler Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 		}
 		jsonItems = append(jsonItems, item)
 	}
-	result, err := json.Marshal(jsonItems)
-	// Не удалось серилизовать json по некой очень редкой проблеме
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	w.Write(result) // nolint:errcheck
+	resp.JSONResponse(&jsonItems, w, http.StatusOK)
 }
 
 // Ping проверяет соединение с базой данных и возвращает 200 OK в случае успешной проверки
@@ -198,4 +184,43 @@ func (handler Handler) Ping(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("OK")) // nolint:errcheck
+}
+
+func (handler Handler) APIShortenBatch(w http.ResponseWriter, r *http.Request) {
+	user, ok := r.Context().Value(middleware.AuthContextKey).(*middleware.AuthUser)
+	if !ok {
+		http.Error(w, "not authenticated", http.StatusForbidden)
+		return
+	}
+	shortenBatchReq := make([]APIShortenBatchRequestItem, 0)
+	if err := json.NewDecoder(r.Body).Decode(&shortenBatchReq); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	// Собираем список для массовой вставки и заодно собираем последущий ответ для клиента
+	batchItems := make([]storage.BatchItem, 0, len(shortenBatchReq))
+	shortenBatchRes := make([]APIShortenBatchResultItem, 0, len(shortenBatchReq))
+	for _, reqItem := range shortenBatchReq {
+		if reqItem.OriginalURL == "" {
+			continue
+		}
+		shortID := handler.App.Hasher.Hash(reqItem.OriginalURL)
+		batchItem := storage.BatchItem{ShortID: shortID, LongURL: reqItem.OriginalURL, UserID: user.ID}
+		resultItem := APIShortenBatchResultItem{
+			CorrelationID: reqItem.CorrelationID,
+			ShortURL:      handler.constructShortURL(shortID, r).String(),
+		}
+		shortenBatchRes = append(shortenBatchRes, resultItem)
+		batchItems = append(batchItems, batchItem)
+	}
+	// Проверяем список на пустоту здесь, поскольку некоторые урлы могли быть отсеяны при валидации
+	if len(batchItems) == 0 {
+		http.Error(w, "please provide a list of urls to shorten", http.StatusBadRequest)
+		return
+	}
+	if err := handler.App.Storage.SaveBatch(r.Context(), batchItems); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	resp.JSONResponse(&shortenBatchRes, w, http.StatusOK)
 }

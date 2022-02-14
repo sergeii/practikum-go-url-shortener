@@ -38,16 +38,16 @@ func setAuthCookie(r *http.Request, secretKey []byte, userID string) *http.Cooki
 	return cookie
 }
 
-func prepareTestServer(overrides ...app.Override) (*httptest.Server, func()) {
+func prepareTestServer(t *testing.T, overrides ...app.Override) (*httptest.Server, *app.App) {
 	shorterner, err := app.New(overrides...)
 	if err != nil {
 		panic(err)
 	}
 	ts := httptest.NewServer(router.New(shorterner))
-	return ts, func() {
-		ts.Close()
-		shorterner.Close()
-	}
+	t.Cleanup(ts.Close)
+	t.Cleanup(shorterner.Close)
+	t.Cleanup(shorterner.Cleanup)
+	return ts, shorterner
 }
 
 func doTestRequest(t *testing.T, ts *httptest.Server, method, path string, body io.Reader) (*http.Response, string) {
@@ -77,8 +77,7 @@ func TestShortenAndExpandAnyLengthURLs(t *testing.T) {
 			"&sa=N&ved=2ahUKEwj3mPjk8aX1AhXDmIsKHf5CC0wQ8tMDegQIAhA5&biw=1280&bih=630&dpr=2",
 	}
 
-	ts, stop := prepareTestServer()
-	defer stop()
+	ts, _ := prepareTestServer(t)
 	for _, TestURL := range TestURLs {
 		resp, body := doTestRequest(t, ts, http.MethodPost, "/", strings.NewReader(TestURL))
 		resp.Body.Close()
@@ -114,8 +113,7 @@ func TestShortenEndpointUnsupportedHTTPMethods(t *testing.T) {
 		},
 	}
 
-	ts, stop := prepareTestServer()
-	defer stop()
+	ts, _ := prepareTestServer(t)
 	for _, tt := range tests {
 		t.Run(tt.method, func(t *testing.T) {
 			resp, _ := doTestRequest(t, ts, tt.method, "/", strings.NewReader("https://example.com/"))
@@ -148,8 +146,7 @@ func TestShortenEndpointRequiresURL(t *testing.T) {
 		},
 	}
 
-	ts, stop := prepareTestServer()
-	defer stop()
+	ts, _ := prepareTestServer(t)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			resp, _ := doTestRequest(t, ts, http.MethodPost, "/", tt.body)
@@ -203,11 +200,10 @@ func TestShortenEndpointSupportsCustomizableBaseURL(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			testBaseURL, _ := url.Parse(tt.configURL)
-			ts, stop := prepareTestServer(func(cfg *app.Config) error {
+			ts, _ := prepareTestServer(t, func(cfg *app.Config) error {
 				cfg.BaseURL = testBaseURL
 				return nil
 			})
-			defer stop()
 			resp, body := doTestRequest(t, ts, http.MethodPost, "/", strings.NewReader("https://ya.ru/"))
 			resp.Body.Close()
 			assert.Equal(t, tt.want, body[:len(body)-7])
@@ -230,8 +226,7 @@ func TestAPIShortenAndExpandURLs(t *testing.T) {
 		Result string `json:"result"`
 	}
 
-	ts, stop := prepareTestServer()
-	defer stop()
+	ts, _ := prepareTestServer(t)
 	for _, TestURL := range TestURLs {
 		reqJSON, _ := json.Marshal(&ShortenReqBody{URL: TestURL}) // nolint:errchkjson
 		resp, body := doTestRequest(t, ts, http.MethodPost, "/api/shorten", bytes.NewReader(reqJSON))
@@ -272,8 +267,7 @@ func TestAPIShortenURLUnsupportedHTTPMethods(t *testing.T) {
 		},
 	}
 
-	ts, stop := prepareTestServer()
-	defer stop()
+	ts, _ := prepareTestServer(t)
 	for _, tt := range tests {
 		t.Run(tt.method, func(t *testing.T) {
 			resp, _ := doTestRequest(t, ts, tt.method, "/api/shorten/", strings.NewReader(`{"url": "https://example.com/"}`))
@@ -331,8 +325,7 @@ func TestAPIShortenEndpointRequiresValidJSON(t *testing.T) {
 		},
 	}
 
-	ts, stop := prepareTestServer()
-	defer stop()
+	ts, _ := prepareTestServer(t)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			resp, _ := doTestRequest(t, ts, http.MethodPost, "/api/shorten", tt.body)
@@ -347,8 +340,7 @@ func TestAPIShortenEndpointRequiresValidJSON(t *testing.T) {
 }
 
 func TestExpandEndpointRequiresShortURLID(t *testing.T) {
-	ts, stop := prepareTestServer()
-	defer stop()
+	ts, _ := prepareTestServer(t)
 	resp, _ := doTestRequest(t, ts, http.MethodGet, "/", nil)
 	resp.Body.Close()
 	assert.Equal(t, 405, resp.StatusCode)
@@ -381,11 +373,8 @@ func TestExpandEndpointRequiresProperID(t *testing.T) {
 		},
 	}
 
-	shorterner, _ := app.New()
-	shorterner.Storage.Set(context.TODO(), "gogogo", "https://go.dev/", "") // nolint: errcheck
-	ts := httptest.NewServer(router.New(shorterner))
-	defer ts.Close()
-	defer shorterner.Close()
+	ts, shorterner := prepareTestServer(t)
+	shorterner.Storage.Set(context.TODO(), "gogogo", "https://go.dev/", "user1") // nolint: errcheck
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -402,11 +391,7 @@ func TestExpandEndpointRequiresProperID(t *testing.T) {
 }
 
 func TestSetAndGetUserURLS(t *testing.T) {
-	shorterner, _ := app.New()
-	ts := httptest.NewServer(router.New(shorterner))
-	defer ts.Close()
-	defer shorterner.Close()
-
+	ts, shorterner := prepareTestServer(t)
 	testURLs := []string{"https://ya.ru", "https://go.dev/"}
 	authCookie := setAuthCookie(nil, shorterner.SecretKey, "user1")
 	for _, testURL := range testURLs {
@@ -461,13 +446,10 @@ func TestGetUserURLs(t *testing.T) {
 	}
 
 	ctx := context.TODO()
-	shorterner, _ := app.New()
+	ts, shorterner := prepareTestServer(t)
 	shorterner.Storage.Set(ctx, "go", "https://go.dev/", "user1")         // nolint: errcheck
 	shorterner.Storage.Set(ctx, "ya", "https://ya.ru/", "user1")          // nolint: errcheck
 	shorterner.Storage.Set(ctx, "imdb", "https://www.imdb.com/", "user2") // nolint: errcheck
-	ts := httptest.NewServer(router.New(shorterner))
-	defer ts.Close()
-	defer shorterner.Close()
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -496,28 +478,19 @@ func TestGetUserURLs(t *testing.T) {
 }
 
 func TestPingEndpointOK(t *testing.T) {
-	shorterner, _ := app.New()
-	defer shorterner.Close()
-
+	ts, shorterner := prepareTestServer(t)
 	if shorterner.DB == nil {
 		t.Skip("Skipping test because db is not configured")
 	}
-
-	ts := httptest.NewServer(router.New(shorterner))
-	defer ts.Close()
-
 	resp, _ := doTestRequest(t, ts, http.MethodGet, "/ping", nil)
 	resp.Body.Close()
 	assert.Equal(t, 200, resp.StatusCode)
 }
 
 func TestPingEndpointNotOK(t *testing.T) {
-	shorterner, _ := app.New()
-	ts := httptest.NewServer(router.New(shorterner))
-	defer ts.Close()
-	defer shorterner.Close()
+	ts, shorterner := prepareTestServer(t)
 	if shorterner.DB != nil {
-		shorterner.DB.Close()
+		shorterner.DB = nil
 	}
 	resp, _ := doTestRequest(t, ts, http.MethodGet, "/ping", nil)
 	resp.Body.Close()

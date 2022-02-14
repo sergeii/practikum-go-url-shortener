@@ -3,7 +3,6 @@ package storage_test
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/sergeii/practikum-go-url-shortener/internal/app"
@@ -24,9 +23,8 @@ func getDatabaseStorage(t *testing.T) *storage.DatabaseURLStorerBackend {
 		panic(err)
 	}
 	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second*1)
-		defer cancel()
-		theStorage.DB.Exec(ctx, "TRUNCATE TABLE urls") // nolint: errcheck
+		theStorage.Cleanup()
+		shorterner.Close()
 	})
 	return theStorage
 }

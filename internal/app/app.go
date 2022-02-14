@@ -80,6 +80,10 @@ func New(overrides ...Override) (*App, error) {
 	return app, nil
 }
 
+func (app *App) Cleanup() {
+	app.Storage.Cleanup()
+}
+
 func (app *App) Close() {
 	if err := app.Storage.Close(); err != nil {
 		log.Printf("failed to close storage %s due to %s; possible data loss", app.Storage, err)
