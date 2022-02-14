@@ -48,9 +48,9 @@ func NewFileURLStorerBackend(filename string) (*FileURLStorerBackend, error) {
 	return &FileURLStorerBackend{filename, cache}, nil
 }
 
-func (backend FileURLStorerBackend) Set(ctx context.Context, shortURLID, longURL, userID string) error {
+func (backend FileURLStorerBackend) Set(ctx context.Context, shortURLID, longURL, userID string) (string, error) {
 	backend.cache[shortURLID] = FileURLItem{longURL, userID}
-	return nil
+	return shortURLID, nil
 }
 
 func (backend FileURLStorerBackend) Get(ctx context.Context, shortURLID string) (string, error) {

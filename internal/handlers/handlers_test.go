@@ -94,6 +94,30 @@ func TestShortenAndExpandAnyLengthURLs(t *testing.T) {
 	}
 }
 
+func TestShortenEndpointHandlesDuplicateURLs(t *testing.T) {
+	ts, shorterner := prepareTestServer(t)
+
+	if shorterner.DB == nil {
+		t.Skip("Skipping test because it requires db")
+	}
+
+	resp, shortURL1 := doTestRequest(t, ts, http.MethodPost, "/", strings.NewReader("https://example.com/"))
+	resp.Body.Close()
+	assert.Equal(t, 201, resp.StatusCode)
+
+	resp, shortURL2 := doTestRequest(t, ts, http.MethodPost, "/", strings.NewReader("https://example.com/"))
+	resp.Body.Close()
+	assert.Equal(t, 409, resp.StatusCode)
+
+	assert.Equal(t, shortURL1, shortURL2)
+
+	parsed, _ := url.Parse(shortURL2)
+	resp, _ = doTestRequest(t, ts, http.MethodGet, parsed.Path, nil)
+	resp.Body.Close()
+	assert.Equal(t, 307, resp.StatusCode)
+	assert.Equal(t, "https://example.com/", resp.Header.Get("Location"))
+}
+
 func TestShortenEndpointUnsupportedHTTPMethods(t *testing.T) {
 	tests := []struct {
 		method   string
@@ -246,6 +270,39 @@ func TestAPIShortenAndExpandURLs(t *testing.T) {
 		assert.Equal(t, 307, resp.StatusCode)
 		assert.Equal(t, TestURL, resp.Header.Get("Location"))
 	}
+}
+
+func TestAPIShortenEndpointHandlesDuplicateURLs(t *testing.T) {
+	var resultJSON1, resultJSON2 handlers.APIShortenResult
+
+	ts, shorterner := prepareTestServer(t)
+	if shorterner.DB == nil {
+		t.Skip("Skipping test because it requires db")
+	}
+
+	reqJSON, _ := json.Marshal(&handlers.APIShortenRequest{URL: "https://example.com/"}) // nolint:errchkjson
+	resp, body := doTestRequest(t, ts, http.MethodPost, "/api/shorten", bytes.NewReader(reqJSON))
+	resp.Body.Close()
+	json.Unmarshal([]byte(body), &resultJSON1) // nolint:errcheck
+
+	require.Equal(t, 201, resp.StatusCode)
+	assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
+
+	reqJSON, _ = json.Marshal(&handlers.APIShortenRequest{URL: "https://example.com/"}) // nolint:errchkjson
+	resp, body = doTestRequest(t, ts, http.MethodPost, "/api/shorten", bytes.NewReader(reqJSON))
+	resp.Body.Close()
+	json.Unmarshal([]byte(body), &resultJSON2) // nolint:errcheck
+
+	require.Equal(t, 409, resp.StatusCode)
+	assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
+
+	assert.Equal(t, resultJSON1.Result, resultJSON2.Result)
+
+	parsed, _ := url.Parse(resultJSON2.Result)
+	resp, _ = doTestRequest(t, ts, http.MethodGet, parsed.Path, nil)
+	resp.Body.Close()
+	assert.Equal(t, 307, resp.StatusCode)
+	assert.Equal(t, "https://example.com/", resp.Header.Get("Location"))
 }
 
 func TestAPIShortenURLUnsupportedHTTPMethods(t *testing.T) {

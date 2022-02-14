@@ -45,18 +45,24 @@ func (handler Handler) constructShortURL(shortID string, r *http.Request) *url.U
 	}
 }
 
-func (handler Handler) shortenAndSaveLongURL(longURL string, r *http.Request) (*url.URL, error) {
+func (handler Handler) shortenAndSaveLongURL(longURL string, r *http.Request) (*url.URL, bool, error) {
 	var userID string
 	if user, ok := r.Context().Value(middleware.AuthContextKey).(*middleware.AuthUser); ok {
 		userID = user.ID
 	}
+	created := true
 	// Получаем короткий идентификатор для ссылки и кладем пару в хранилище
-	shortID := handler.App.Hasher.Hash(longURL)
-	if err := handler.App.Storage.Set(r.Context(), shortID, longURL, userID); err != nil {
-		return nil, err
+	proposedShortID := handler.App.Hasher.Hash(longURL)
+	shortID, err := handler.App.Storage.Set(r.Context(), proposedShortID, longURL, userID)
+	if err != nil {
+		if errors.Is(err, storage.ErrURLAlreadyExists) {
+			created = false
+		} else {
+			return nil, false, err
+		}
 	}
 	shortURL := handler.constructShortURL(shortID, r)
-	return shortURL, nil
+	return shortURL, created, nil
 }
 
 // ShortenURL принимает на вход произвольный URL в теле запроса и создает для него "короткую" версию,
@@ -75,12 +81,17 @@ func (handler Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	shortURL, err := handler.shortenAndSaveLongURL(longURL, r)
+	respStatus := http.StatusCreated
+	// В случае конфликта при сохранении отдаем статус 409 и возвращаем короткий URL для ссылки, сохраненной ранее
+	shortURL, created, err := handler.shortenAndSaveLongURL(longURL, r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.WriteHeader(http.StatusCreated)
+	if !created {
+		respStatus = http.StatusConflict
+	}
+	w.WriteHeader(respStatus)
 	w.Write([]byte(shortURL.String())) // nolint:errcheck
 }
 
@@ -125,15 +136,18 @@ func (handler Handler) APIShortenURL(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "please provide a url to shorten", http.StatusBadRequest)
 		return
 	}
-
-	shortURL, err := handler.shortenAndSaveLongURL(shortenReq.URL, r)
+	respStatus := http.StatusCreated
+	// В случае конфликта при сохранении отдаем статус 409 и возвращаем короткий URL для ссылки, сохраненной ранее
+	shortURL, created, err := handler.shortenAndSaveLongURL(shortenReq.URL, r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
+	if !created {
+		respStatus = http.StatusConflict
+	}
 	resultItem := APIShortenResult{Result: shortURL.String()}
-	resp.JSONResponse(&resultItem, w, http.StatusCreated)
+	resp.JSONResponse(&resultItem, w, respStatus)
 }
 
 // GetUserURLs возвращает полный список всех ссылок, сокращенных текущим пользователем.

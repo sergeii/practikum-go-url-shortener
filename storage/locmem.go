@@ -16,9 +16,9 @@ func NewLocmemURLStorerBackend() *LocmemURLStorerBackend {
 	return &LocmemURLStorerBackend{Storage: storage}
 }
 
-func (backend LocmemURLStorerBackend) Set(ctx context.Context, shortURLID, longURL, userID string) error {
+func (backend LocmemURLStorerBackend) Set(ctx context.Context, shortURLID, longURL, userID string) (string, error) {
 	backend.Storage[shortURLID] = LocURLItem{longURL, userID}
-	return nil
+	return shortURLID, nil
 }
 
 func (backend LocmemURLStorerBackend) Get(ctx context.Context, shortURLID string) (string, error) {

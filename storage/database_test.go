@@ -51,9 +51,6 @@ func TestSaveURLToDatabaseStorage(t *testing.T) {
 	theStorage := getDatabaseStorage(t)
 	db := theStorage.DB
 
-	theStorage.Set(ctx, "foo", "https://practicum.yandex.ru/", "user1") // nolint: errcheck
-	assert.Equal(t, "https://practicum.yandex.ru/", getRowForShortID(db, "foo").LongURL)
-	// Можем перезаписать
 	theStorage.Set(ctx, "foo", "https://go.dev/", "user1") // nolint: errcheck
 	assert.Equal(t, "https://go.dev/", getRowForShortID(db, "foo").LongURL)
 
@@ -131,8 +128,8 @@ func TestGetUserURLsFromDatabaseStorage(t *testing.T) {
 	theStorage.Set(ctx, "foo", "https://practicum.yandex.ru/", user1) // nolint: errcheck
 	theStorage.Set(ctx, "bar", "https://go.dev/", user1)              // nolint: errcheck
 	theStorage.Set(ctx, "foo", "https://google.com/", user2)          // nolint: errcheck
-	theStorage.Set(ctx, "baz", "https://google.com/", user2)          // nolint: errcheck
-	theStorage.Set(ctx, "ham", "https://google.com/", "")             // nolint: errcheck
+	theStorage.Set(ctx, "baz", "https://exampe.com/", user2)          // nolint: errcheck
+	theStorage.Set(ctx, "ham", "https://wikipedia.org/", "")          // nolint: errcheck
 
 	user1Items, _ := theStorage.GetURLsByUserID(ctx, user1)
 	assert.Len(t, user1Items, 2)

@@ -25,9 +25,10 @@ CREATE TABLE IF NOT EXISTS urls (
     CHECK (user_id <> '')
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS urls_short_id_user_id_uniq_idx ON urls (short_id, user_id);
-ALTER TABLE urls DROP CONSTRAINT IF EXISTS urls_short_url_uniq_for_user;
-ALTER TABLE urls ADD CONSTRAINT urls_short_url_uniq_for_user UNIQUE USING INDEX urls_short_id_user_id_uniq_idx;
+CREATE UNIQUE INDEX IF NOT EXISTS urls_original_url_uniq_idx ON urls (original_url);
+ALTER TABLE urls DROP CONSTRAINT IF EXISTS urls_original_url_uniq;
+ALTER TABLE urls ADD CONSTRAINT urls_original_url_uniq UNIQUE USING INDEX urls_original_url_uniq_idx;
+
 CREATE INDEX IF NOT EXISTS urls_user_id_idx ON urls(user_id);
 `
 
@@ -41,18 +42,36 @@ func NewDatabaseURLStorerBackend(db *pgxpool.Pool, timeout time.Duration) (*Data
 	return &DatabaseURLStorerBackend{db, timeout}, nil
 }
 
-func (backend DatabaseURLStorerBackend) Set(ctx context.Context, shortURLID, longURL, userID string) error {
+func (backend DatabaseURLStorerBackend) Set(ctx context.Context, shortURLID, longURL, userID string) (string, error) {
+	var rowID int
 	ctx, cancel := context.WithTimeout(ctx, backend.timeout)
 	defer cancel()
-
-	_, err := backend.DB.Exec(
+	err := backend.DB.QueryRow(
 		ctx,
 		"INSERT INTO urls (short_id, original_url, user_id) VALUES($1, $2, $3) "+
-			"ON CONFLICT ON CONSTRAINT urls_short_url_uniq_for_user DO "+
-			"UPDATE SET original_url = EXCLUDED.original_url",
+			"ON CONFLICT DO NOTHING "+
+			"RETURNING id",
 		shortURLID, longURL, userID,
-	)
-	return err
+	).Scan(&rowID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			actualShortID, _ := backend.getShortIDForURL(ctx, longURL)
+			return actualShortID, ErrURLAlreadyExists
+		}
+		return "", err
+	}
+	return shortURLID, nil
+}
+
+func (backend DatabaseURLStorerBackend) getShortIDForURL(ctx context.Context, longURL string) (string, error) {
+	var shortID string
+	ctx, cancel := context.WithTimeout(ctx, backend.timeout)
+	defer cancel()
+	err := backend.DB.QueryRow(ctx, "SELECT short_id FROM urls WHERE original_url = $1", longURL).Scan(&shortID)
+	if err != nil {
+		return "", err
+	}
+	return shortID, nil
 }
 
 func (backend DatabaseURLStorerBackend) Get(ctx context.Context, shortURLID string) (string, error) {
@@ -114,10 +133,10 @@ func (backend DatabaseURLStorerBackend) SaveBatch(ctx context.Context, items []B
 		}
 	}(ctx)
 
-	preparedSQL := "INSERT INTO urls (short_id, original_url, user_id) VALUES($1,$2,$3) " +
-		"ON CONFLICT ON CONSTRAINT urls_short_url_uniq_for_user DO " +
-		"UPDATE SET original_url = EXCLUDED.original_url"
-	if _, err := tx.Prepare(ctx, "batch", preparedSQL); err != nil {
+	prepSQL :=
+		"INSERT INTO urls (short_id, original_url, user_id) VALUES($1,$2,$3) " +
+			"ON CONFLICT ON CONSTRAINT urls_original_url_uniq DO NOTHING"
+	if _, err := tx.Prepare(ctx, "batch", prepSQL); err != nil {
 		return err
 	}
 
