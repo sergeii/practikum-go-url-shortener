@@ -25,7 +25,7 @@ func useFlags(cfg *app.Config) error {
 		if err != nil {
 			return err
 		}
-		cfg.BaseURL = u
+		cfg.BaseURL = *u
 	}
 	if flagConfig.ServerAddress != "" {
 		cfg.ServerAddress = flagConfig.ServerAddress

@@ -225,7 +225,7 @@ func TestShortenEndpointSupportsCustomizableBaseURL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			testBaseURL, _ := url.Parse(tt.configURL)
 			ts, _ := prepareTestServer(t, func(cfg *app.Config) error {
-				cfg.BaseURL = testBaseURL
+				cfg.BaseURL = *testBaseURL
 				return nil
 			})
 			resp, body := doTestRequest(t, ts, http.MethodPost, "/", strings.NewReader("https://ya.ru/"))

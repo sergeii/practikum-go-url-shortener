@@ -18,7 +18,7 @@ import (
 const SecretKeyLength = 32
 
 type Config struct {
-	BaseURL                *url.URL      `env:"BASE_URL"`
+	BaseURL                url.URL       `env:"BASE_URL" envDefault:"http://localhost:8080/"`
 	ServerAddress          string        `env:"SERVER_ADDRESS" envDefault:"localhost:8080"`
 	ServerShutdownTimeout  time.Duration `env:"SERVER_SHUTDOWN_TIMEOUT" envDefault:"5s"`
 	FileStoragePath        string        `env:"FILE_STORAGE_PATH"`

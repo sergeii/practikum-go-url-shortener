@@ -21,25 +21,13 @@ type Handler struct {
 	App *app.App
 }
 
-func (handler Handler) constructShortURL(shortID string, r *http.Request) *url.URL {
+func (handler Handler) constructShortURL(shortID string) *url.URL {
 	// Мы возвращаем короткую ссылку используя настройки базового URL сервиса
-	// В случае его отстуствия используем имя хоста, с которым был совершен запрос
-	baseURLScheme, baseURLHost, baseURLPath := "http", r.Host, "/"
-	if handler.App.Config.BaseURL != nil {
-		if handler.App.Config.BaseURL.Scheme != "" {
-			baseURLScheme = handler.App.Config.BaseURL.Scheme
-		}
-		if handler.App.Config.BaseURL.Host != "" {
-			baseURLHost = handler.App.Config.BaseURL.Host
-		}
-		if handler.App.Config.BaseURL.Path != "" {
-			baseURLPath = handler.App.Config.BaseURL.Path
-		}
-	}
-	shortURLPath := strings.TrimRight(baseURLPath, "/") + "/" + shortID
+	baseURL := handler.App.Config.BaseURL
+	shortURLPath := strings.TrimRight(baseURL.Path, "/") + "/" + shortID
 	return &url.URL{
-		Scheme: baseURLScheme,
-		Host:   baseURLHost,
+		Scheme: baseURL.Scheme,
+		Host:   baseURL.Host,
 		Path:   shortURLPath,
 	}
 }
@@ -60,7 +48,7 @@ func (handler Handler) shortenAndSaveLongURL(longURL string, r *http.Request) (*
 			return nil, false, err
 		}
 	}
-	shortURL := handler.constructShortURL(shortID, r)
+	shortURL := handler.constructShortURL(shortID)
 	return shortURL, created, nil
 }
 
@@ -176,7 +164,7 @@ func (handler Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 	jsonItems := make([]APIUserURLItem, 0, len(items))
 	for shortID, longURL := range items {
 		item := APIUserURLItem{
-			ShortURL:    handler.constructShortURL(shortID, r).String(),
+			ShortURL:    handler.constructShortURL(shortID).String(),
 			OriginalURL: longURL,
 		}
 		jsonItems = append(jsonItems, item)
@@ -225,7 +213,7 @@ func (handler Handler) APIShortenBatch(w http.ResponseWriter, r *http.Request) {
 		batchItem := storage.BatchItem{ShortID: shortID, LongURL: reqItem.OriginalURL, UserID: user.ID}
 		resultItem := APIShortenBatchResultItem{
 			CorrelationID: reqItem.CorrelationID,
-			ShortURL:      handler.constructShortURL(shortID, r).String(),
+			ShortURL:      handler.constructShortURL(shortID).String(),
 		}
 		shortenBatchRes = append(shortenBatchRes, resultItem)
 		batchItems = append(batchItems, batchItem)
