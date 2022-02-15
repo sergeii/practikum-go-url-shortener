@@ -535,23 +535,10 @@ func TestGetUserURLs(t *testing.T) {
 }
 
 func TestPingEndpointOK(t *testing.T) {
-	ts, shorterner := prepareTestServer(t)
-	if shorterner.DB == nil {
-		t.Skip("Skipping test because db is not configured")
-	}
+	ts, _ := prepareTestServer(t)
 	resp, _ := doTestRequest(t, ts, http.MethodGet, "/ping", nil)
 	resp.Body.Close()
 	assert.Equal(t, 200, resp.StatusCode)
-}
-
-func TestPingEndpointNotOK(t *testing.T) {
-	ts, shorterner := prepareTestServer(t)
-	if shorterner.DB != nil {
-		shorterner.DB = nil
-	}
-	resp, _ := doTestRequest(t, ts, http.MethodGet, "/ping", nil)
-	resp.Body.Close()
-	assert.Equal(t, 500, resp.StatusCode)
 }
 
 func TestAPIShortenBatchRequest(t *testing.T) {

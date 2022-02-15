@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -69,16 +68,18 @@ func (handler Handler) shortenAndSaveLongURL(longURL string, r *http.Request) (*
 // при переходе по которой пользователь попадет на оригинальный "длинный" URL
 // В случае успеха возвращает код 201 и готовую короткую ссылку в теле ответа
 // В случае отстуствия валидного URL в теле запроса вернет ошибку 400
+// В случае наличия в хранилище сокращаемой ссылки возвращает статус 409
+// и ранее сокращенную ссылку в теле ответа
 func (handler Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	// Пытаемся получить длинный url из тела запроса
 	longURL := string(body)
 	if longURL == "" {
 		http.Error(w, "please provide a url to shorten", http.StatusBadRequest)
-		return
-	}
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	respStatus := http.StatusCreated
@@ -124,6 +125,8 @@ func (handler Handler) ExpandURL(w http.ResponseWriter, r *http.Request) {
 // Эндпоинт принимает ссылку в виде json, URL в котором указывается ключем "url"
 // В случае успеха возвращает код 201 и готовую короткую ссылку в теле ответа, так же в виде json.
 // В случае отстуствия валидного URL в теле запроса вернет ошибку 400
+// В случае наличия в хранилище сокращаемой ссылки возвращает статус 409
+// и ранее сокращенную ссылку в ответе
 func (handler Handler) APIShortenURL(w http.ResponseWriter, r *http.Request) {
 	var shortenReq APIShortenRequest
 	// Получили невалидный json
@@ -181,18 +184,12 @@ func (handler Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 	resp.JSONResponse(&jsonItems, w, http.StatusOK)
 }
 
-// Ping проверяет соединение с базой данных и возвращает 200 OK в случае успешной проверки
+// Ping проверяет статус хранилища и возвращает 200 OK в случае успешной проверки
 // В случае наличия проблем с подключением или ошибкой, связанной с превышением времени ожидания ответа,
 // возвращает ошибку 500
 func (handler Handler) Ping(w http.ResponseWriter, r *http.Request) {
-	if handler.App.DB == nil {
-		http.Error(w, "database is not available", http.StatusInternalServerError)
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), handler.App.Config.DatabaseConnectTimeout)
-	defer cancel()
-	if err := handler.App.DB.Ping(ctx); err != nil {
-		log.Printf("failed to ping database because of %s\n", err)
+	if err := handler.App.Storage.Ping(r.Context()); err != nil {
+		log.Printf("failed to ping storage because of %s\n", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -200,6 +197,12 @@ func (handler Handler) Ping(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("OK")) // nolint:errcheck
 }
 
+// APIShortenBatch принимает список URL для сокращения.
+// Список для сокращения представляет собой список пар URL - Correlation ID
+// При успешном выполнении операции возвращает список сокращенных ссылок
+// так же в виде пар Сокращенный URL - Correlation ID, при этом
+// Correlation ID для каждой ссылки соответствует значению длинной ссылки,
+// которое предоставил клиент в запросе
 func (handler Handler) APIShortenBatch(w http.ResponseWriter, r *http.Request) {
 	user, ok := r.Context().Value(middleware.AuthContextKey).(*middleware.AuthUser)
 	if !ok {

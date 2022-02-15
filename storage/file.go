@@ -81,6 +81,10 @@ func (backend FileURLStorerBackend) SaveBatch(ctx context.Context, items []Batch
 	return nil
 }
 
+func (backend FileURLStorerBackend) Ping(ctx context.Context) error {
+	return nil
+}
+
 func (backend FileURLStorerBackend) Cleanup() {
 	// do nothing
 }

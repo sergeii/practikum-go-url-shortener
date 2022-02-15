@@ -49,8 +49,7 @@ func (backend DatabaseURLStorerBackend) Set(ctx context.Context, shortURLID, lon
 	err := backend.DB.QueryRow(
 		ctx,
 		"INSERT INTO urls (short_id, original_url, user_id) VALUES($1, $2, $3) "+
-			"ON CONFLICT DO NOTHING "+
-			"RETURNING id",
+			"ON CONFLICT DO NOTHING RETURNING id",
 		shortURLID, longURL, userID,
 	).Scan(&rowID)
 	if err != nil {
@@ -133,9 +132,8 @@ func (backend DatabaseURLStorerBackend) SaveBatch(ctx context.Context, items []B
 		}
 	}(ctx)
 
-	prepSQL :=
-		"INSERT INTO urls (short_id, original_url, user_id) VALUES($1,$2,$3) " +
-			"ON CONFLICT ON CONSTRAINT urls_original_url_uniq DO NOTHING"
+	prepSQL := "INSERT INTO urls (short_id, original_url, user_id) VALUES($1,$2,$3) " +
+		"ON CONFLICT ON CONSTRAINT urls_original_url_uniq DO NOTHING"
 	if _, err := tx.Prepare(ctx, "batch", prepSQL); err != nil {
 		return err
 	}
@@ -148,8 +146,19 @@ func (backend DatabaseURLStorerBackend) SaveBatch(ctx context.Context, items []B
 	return tx.Commit(ctx)
 }
 
+func (backend DatabaseURLStorerBackend) Ping(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, backend.timeout)
+	defer cancel()
+	if err := backend.DB.Ping(ctx); err != nil {
+		log.Printf("failed to ping database because of %s\n", err)
+		return err
+	}
+	return nil
+}
+
+// Cleanup отчищает таблицу с сокращенными урлами с помощью вызова TRUNCATE
+// Метод предназначен только для вызовов в тестах
 func (backend DatabaseURLStorerBackend) Cleanup() {
-	// Подчищаем таблицу с урлами между тестами
 	ctx, cancel := context.WithTimeout(context.Background(), backend.timeout)
 	defer cancel()
 	if _, err := backend.DB.Exec(ctx, "TRUNCATE TABLE urls"); err != nil {

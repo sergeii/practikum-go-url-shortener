@@ -95,7 +95,6 @@ func WithAuthentication(secretKey []byte) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var user *AuthUser
-
 			// Пробуем прочитать авторизационную куку, провалидировать ее подлинность
 			// и в итоге получить идентификатор пользователя
 			user, err := authenticateUser(r, secretKey)
@@ -104,7 +103,6 @@ func WithAuthentication(secretKey []byte) func(http.Handler) http.Handler {
 			if err != nil {
 				log.Printf("unable to authenticate user due to %v\n", err)
 			}
-
 			// Для анонима генерируем новый идентификатор
 			if user == nil {
 				user, err = createNewUser()
@@ -117,15 +115,6 @@ func WithAuthentication(secretKey []byte) func(http.Handler) http.Handler {
 			} else {
 				log.Printf("autheticated existing user with id %s\n", user.ID)
 			}
-
-			// К этому моменту мы должны иметь инициализированную структуру пользователя
-			// Если это не так, то в коде выше что-то пошло не так
-			if user == nil {
-				log.Println("user is neither authenticated nor generated")
-				http.Error(w, "authentication error", http.StatusInternalServerError)
-				return
-			}
-
 			ctx := context.WithValue(r.Context(), AuthContextKey, user)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})

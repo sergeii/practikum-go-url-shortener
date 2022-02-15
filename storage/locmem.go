@@ -49,6 +49,10 @@ func (backend LocmemURLStorerBackend) SaveBatch(ctx context.Context, items []Bat
 	return nil
 }
 
+func (backend LocmemURLStorerBackend) Ping(ctx context.Context) error {
+	return nil
+}
+
 func (backend LocmemURLStorerBackend) Cleanup() {
 	// do nothing
 }

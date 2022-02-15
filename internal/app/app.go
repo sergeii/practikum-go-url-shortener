@@ -10,9 +10,7 @@ import (
 	"time"
 
 	"github.com/caarlos0/env/v6"
-
 	"github.com/jackc/pgx/v4/pgxpool"
-
 	"github.com/sergeii/practikum-go-url-shortener/pkg/url/hasher"
 	"github.com/sergeii/practikum-go-url-shortener/storage"
 )
@@ -25,7 +23,7 @@ type Config struct {
 	ServerShutdownTimeout  time.Duration `env:"SERVER_SHUTDOWN_TIMEOUT" envDefault:"5s"`
 	FileStoragePath        string        `env:"FILE_STORAGE_PATH"`
 	SecretKey              string        `env:"SECRET_KEY"`
-	DatabaseDSN            string        `env:"DATABASE_DSN" envDefault:"postgres://shortener:shortener@localhost:5432/shortener"` // nolint:lll
+	DatabaseDSN            string        `env:"DATABASE_DSN"`
 	DatabaseConnectTimeout time.Duration `env:"DATABASE_CONNECT_TIMEOUT" envDefault:"1s"`
 	DatabaseQueryTimeout   time.Duration `env:"DATABASE_QUERY_TIMEOUT" envDefault:"1s"`
 }
@@ -42,6 +40,7 @@ type Override func(*Config) error
 
 func New(overrides ...Override) (*App, error) {
 	var cfg Config
+	var db *pgxpool.Pool
 	// Получаем настройки приложения из environment-переменных
 	if err := env.Parse(&cfg); err != nil {
 		return nil, err
@@ -53,11 +52,12 @@ func New(overrides ...Override) (*App, error) {
 		}
 	}
 
-	db, err := configureDatabase(&cfg)
-	if err != nil {
-		return nil, fmt.Errorf("unable to configure database due to %w", err)
-	} else if db == nil {
-		log.Println("starting without db because connection failed")
+	if cfg.DatabaseDSN != "" {
+		pgpool, err := configureDatabase(&cfg)
+		if err != nil {
+			return nil, fmt.Errorf("unable to configure database due to %w", err)
+		}
+		db = pgpool
 	}
 
 	store, err := configureStorage(&cfg, db)
@@ -123,14 +123,12 @@ func configureSecretKey(cfg *Config) ([]byte, error) {
 	return randKey, nil
 }
 
-// nolint: unparam
 func configureDatabase(cfg *Config) (*pgxpool.Pool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.DatabaseConnectTimeout)
 	defer cancel()
 	db, err := pgxpool.Connect(ctx, cfg.DatabaseDSN)
-	// база данных доступна не всегда, поэтому допускаем работу приложения без бд
 	if err != nil {
-		return nil, nil // nolint:nilerr, nilnil
+		return nil, err
 	}
 	return db, nil
 }
