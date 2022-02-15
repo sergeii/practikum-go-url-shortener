@@ -1,0 +1,25 @@
+version: "3.2"
+
+services:
+  postgresql:
+    image: postgres:14.2
+    ports:
+      - "5432:5432"
+    tmpfs:
+      - /run
+      - /var/run
+      - /tmp
+      - /var/lib/postgresql/data
+    environment:
+      - POSTGRES_INITDB_ARGS=--nosync
+      - POSTGRES_USER=shortener
+      - POSTGRES_DB=shortener
+      - POSTGRES_HOST_AUTH_METHOD=trust
+    command: >
+      postgres
+        -c log_statement=none
+        -c logging_collector=off
+        -c log_min_duration_statement=-1
+        -c log_min_error_statement=panic
+    logging:
+      driver: none
