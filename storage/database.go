@@ -15,6 +15,10 @@ type DatabaseURLStorerBackend struct {
 	timeout time.Duration
 }
 
+type conn interface {
+	QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row
+}
+
 const initDatabaseSQL = `
 CREATE TABLE IF NOT EXISTS urls (
     id SERIAL PRIMARY KEY,
@@ -26,9 +30,7 @@ CREATE TABLE IF NOT EXISTS urls (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS urls_original_url_uniq_idx ON urls (original_url);
-ALTER TABLE urls DROP CONSTRAINT IF EXISTS urls_original_url_uniq;
-ALTER TABLE urls ADD CONSTRAINT urls_original_url_uniq UNIQUE USING INDEX urls_original_url_uniq_idx;
-
+CREATE UNIQUE INDEX IF NOT EXISTS urls_short_id_uniq_idx ON urls (short_id);
 CREATE INDEX IF NOT EXISTS urls_user_id_idx ON urls(user_id);
 `
 
@@ -54,23 +56,12 @@ func (backend DatabaseURLStorerBackend) Set(ctx context.Context, shortURLID, lon
 	).Scan(&rowID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			actualShortID, _ := backend.getShortIDForURL(ctx, longURL)
+			actualShortID, _ := backend.getShortIDForURL(ctx, backend.DB, longURL)
 			return actualShortID, ErrURLAlreadyExists
 		}
 		return "", err
 	}
 	return shortURLID, nil
-}
-
-func (backend DatabaseURLStorerBackend) getShortIDForURL(ctx context.Context, longURL string) (string, error) {
-	var shortID string
-	ctx, cancel := context.WithTimeout(ctx, backend.timeout)
-	defer cancel()
-	err := backend.DB.QueryRow(ctx, "SELECT short_id FROM urls WHERE original_url = $1", longURL).Scan(&shortID)
-	if err != nil {
-		return "", err
-	}
-	return shortID, nil
 }
 
 func (backend DatabaseURLStorerBackend) Get(ctx context.Context, shortURLID string) (string, error) {
@@ -120,10 +111,12 @@ func (backend DatabaseURLStorerBackend) GetURLsByUserID(ctx context.Context, use
 	return items, nil
 }
 
-func (backend DatabaseURLStorerBackend) SaveBatch(ctx context.Context, items []BatchItem) error {
+func (backend DatabaseURLStorerBackend) SaveBatch(ctx context.Context, items []BatchItem) (map[string]string, error) {
+	var rowID int
+
 	tx, err := backend.DB.Begin(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func(ctx context.Context) {
 		err := tx.Rollback(ctx)
@@ -132,18 +125,34 @@ func (backend DatabaseURLStorerBackend) SaveBatch(ctx context.Context, items []B
 		}
 	}(ctx)
 
-	prepSQL := "INSERT INTO urls (short_id, original_url, user_id) VALUES($1,$2,$3) " +
-		"ON CONFLICT ON CONSTRAINT urls_original_url_uniq DO NOTHING"
+	prepSQL := "INSERT INTO urls (short_id, original_url, user_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING RETURNING id"
 	if _, err := tx.Prepare(ctx, "batch", prepSQL); err != nil {
-		return err
+		return nil, err
 	}
 
+	result := make(map[string]string)
 	for _, item := range items {
-		if _, err = tx.Exec(ctx, "batch", item.ShortID, item.LongURL, item.UserID); err != nil {
-			return err
+		err = tx.QueryRow(ctx, "batch", item.ShortID, item.LongURL, item.UserID).Scan(&rowID)
+		if err != nil {
+			// строка не записалась из-за конфликта - пытаемся получить идентификатор ранее сокращенной ссылки
+			if errors.Is(err, pgx.ErrNoRows) {
+				actualShortID, recoveryErr := backend.getShortIDForURL(ctx, tx, item.LongURL)
+				// не получилось разрешить конфликт - пропускаем ссылку
+				if recoveryErr != nil {
+					continue
+				}
+				result[item.LongURL] = actualShortID
+			} else {
+				return nil, err
+			}
+		} else {
+			result[item.LongURL] = item.ShortID
 		}
 	}
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func (backend DatabaseURLStorerBackend) Ping(ctx context.Context) error {
@@ -169,4 +178,18 @@ func (backend DatabaseURLStorerBackend) Cleanup() {
 func (backend DatabaseURLStorerBackend) Close() error {
 	// соединение к бд закрывается на уровне приложения
 	return nil
+}
+
+func (backend DatabaseURLStorerBackend) getShortIDForURL(ctx context.Context, conn conn, url string) (string, error) {
+	var shortID string
+	ctx, cancel := context.WithTimeout(ctx, backend.timeout)
+	defer cancel()
+	err := conn.QueryRow(ctx, "SELECT short_id FROM urls WHERE original_url = $1", url).Scan(&shortID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrURLNotFound
+		}
+		return "", err
+	}
+	return shortID, nil
 }

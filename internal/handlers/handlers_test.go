@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -38,12 +39,31 @@ func setAuthCookie(r *http.Request, secretKey []byte, userID string) *http.Cooki
 	return cookie
 }
 
+// nolint:unparam
 func prepareTestServer(t *testing.T, overrides ...app.Override) (*httptest.Server, *app.App) {
+	var fileStoragePath string
+	// для того чтобы тесты не мешали друг другу при установленной env-переменной FILE_STORAGE_PATH
+	// для каждого экземляра shortener подставляем рандомный путь до файла
+	overrides = append(overrides, func(cfg *app.Config) error {
+		if cfg.FileStoragePath != "" {
+			f, _ := os.CreateTemp("", "*")
+			f.Close()
+			fileStoragePath = f.Name()
+			cfg.FileStoragePath = fileStoragePath
+			return nil
+		}
+		return nil
+	})
 	shorterner, err := app.New(overrides...)
 	if err != nil {
 		panic(err)
 	}
 	ts := httptest.NewServer(router.New(shorterner))
+	t.Cleanup(func() {
+		if fileStoragePath != "" {
+			os.Remove(fileStoragePath)
+		}
+	})
 	t.Cleanup(ts.Close)
 	t.Cleanup(shorterner.Close)
 	t.Cleanup(shorterner.Cleanup)
@@ -95,11 +115,7 @@ func TestShortenAndExpandAnyLengthURLs(t *testing.T) {
 }
 
 func TestShortenEndpointHandlesDuplicateURLs(t *testing.T) {
-	ts, shorterner := prepareTestServer(t)
-
-	if shorterner.DB == nil {
-		t.Skip("Skipping test because it requires db")
-	}
+	ts, _ := prepareTestServer(t)
 
 	resp, shortURL1 := doTestRequest(t, ts, http.MethodPost, "/", strings.NewReader("https://example.com/"))
 	resp.Body.Close()
@@ -221,13 +237,11 @@ func TestShortenEndpointSupportsCustomizableBaseURL(t *testing.T) {
 			want:      "https://example.com/link/",
 		},
 	}
+	ts, shortener := prepareTestServer(t)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			testBaseURL, _ := url.Parse(tt.configURL)
-			ts, _ := prepareTestServer(t, func(cfg *app.Config) error {
-				cfg.BaseURL = *testBaseURL
-				return nil
-			})
+			shortener.Config.BaseURL = *testBaseURL
 			resp, body := doTestRequest(t, ts, http.MethodPost, "/", strings.NewReader("https://ya.ru/"))
 			resp.Body.Close()
 			assert.Equal(t, tt.want, body[:len(body)-7])
@@ -459,7 +473,7 @@ func TestSetAndGetUserURLS(t *testing.T) {
 		assert.Equal(t, 201, resp.StatusCode)
 	}
 
-	req, _ := http.NewRequest("GET", ts.URL+"/user/urls", nil)
+	req, _ := http.NewRequest("GET", ts.URL+"/api/user/urls", nil)
 	req.AddCookie(authCookie)
 	resp, _ := http.DefaultClient.Do(req)
 	body, _ := ioutil.ReadAll(resp.Body)
@@ -510,7 +524,7 @@ func TestGetUserURLs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req, _ := http.NewRequest("GET", ts.URL+"/user/urls", nil)
+			req, _ := http.NewRequest("GET", ts.URL+"/api/user/urls", nil)
 			if tt.userID != "" {
 				setAuthCookie(req, shorterner.SecretKey, tt.userID)
 			}
@@ -542,7 +556,8 @@ func TestPingEndpointOK(t *testing.T) {
 }
 
 func TestAPIShortenBatchRequest(t *testing.T) {
-	ts, _ := prepareTestServer(t)
+	ts, shortener := prepareTestServer(t)
+	shortener.Storage.Set(context.TODO(), "go", "https://go.dev", "user100500") // nolint:errcheck
 
 	TestURLs := map[string]string{
 		"foo": "https://ya.ru",
@@ -551,6 +566,7 @@ func TestAPIShortenBatchRequest(t *testing.T) {
 		"ham": "https://www.google.com/search?q=golang&client=safari&ei=k3jbYbeDNMOxrgT-ha3gBA" +
 			"&start=10&sa=N&ved=2ahUKEwj3mPjk8aX1AhXDmIsKHf5CC0wQ8tMDegQIAhA5&biw=1280&bih=630&dpr=2",
 		"eggs": "",
+		"spam": "https://go.dev", // дубль существующей длинной ссылки
 	}
 
 	reqItems := make([]handlers.APIShortenBatchRequestItem, 0, len(TestURLs))
@@ -569,14 +585,19 @@ func TestAPIShortenBatchRequest(t *testing.T) {
 	}
 
 	require.Equal(t, 201, resp.StatusCode)
-	assert.Len(t, respItems, 4)
-	assert.Len(t, resultURLs, 4)
+	assert.Len(t, respItems, 5)
+	assert.Len(t, resultURLs, 5)
 	assert.Contains(t, resultURLs, "foo")
 	assert.Contains(t, resultURLs, "bar")
 	assert.Contains(t, resultURLs, "baz")
 	assert.Contains(t, resultURLs, "ham")
+	assert.NotContains(t, resultURLs, "eggs")
+	assert.Contains(t, resultURLs, "spam")
 
+	// обработали дубли, вернув имеющиеся короткие ссылки
+	assert.Equal(t, strings.TrimRight(shortener.Config.BaseURL.String(), "/")+"/go", resultURLs["spam"])
 	assert.Equal(t, resultURLs["foo"], resultURLs["baz"])
+
 	parsed, _ := url.Parse(resultURLs["baz"])
 	resp, _ = doTestRequest(t, ts, http.MethodGet, parsed.Path, nil)
 	resp.Body.Close()

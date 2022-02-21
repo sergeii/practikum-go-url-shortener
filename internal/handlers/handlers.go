@@ -202,30 +202,40 @@ func (handler Handler) APIShortenBatch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	// Собираем список для массовой вставки и заодно собираем последущий ответ для клиента
+	// Собираем список для массовой вставки
 	batchItems := make([]storage.BatchItem, 0, len(shortenBatchReq))
-	shortenBatchRes := make([]APIShortenBatchResultItem, 0, len(shortenBatchReq))
+	correlationIDs := make(map[string]string)
 	for _, reqItem := range shortenBatchReq {
 		if reqItem.OriginalURL == "" {
 			continue
 		}
 		shortID := handler.App.Hasher.Hash(reqItem.OriginalURL)
 		batchItem := storage.BatchItem{ShortID: shortID, LongURL: reqItem.OriginalURL, UserID: user.ID}
-		resultItem := APIShortenBatchResultItem{
-			CorrelationID: reqItem.CorrelationID,
-			ShortURL:      handler.constructShortURL(shortID).String(),
-		}
-		shortenBatchRes = append(shortenBatchRes, resultItem)
 		batchItems = append(batchItems, batchItem)
+		// запоминаем соответствие correlation и сокращаемой ссылки для последующего ответа
+		correlationIDs[reqItem.CorrelationID] = reqItem.OriginalURL
 	}
 	// Проверяем список на пустоту здесь, поскольку некоторые урлы могли быть отсеяны при валидации
 	if len(batchItems) == 0 {
 		http.Error(w, "please provide a list of urls to shorten", http.StatusBadRequest)
 		return
 	}
-	if err := handler.App.Storage.SaveBatch(r.Context(), batchItems); err != nil {
+
+	resultItems, err := handler.App.Storage.SaveBatch(r.Context(), batchItems)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	shortenBatchRes := make([]APIShortenBatchResultItem, 0, len(resultItems))
+	// Собираем ответ для клиента, учитывая дубли
+	for correlationID, originalURL := range correlationIDs {
+		actualShortID := resultItems[originalURL]
+		resultItem := APIShortenBatchResultItem{
+			CorrelationID: correlationID,
+			ShortURL:      handler.constructShortURL(actualShortID).String(),
+		}
+		shortenBatchRes = append(shortenBatchRes, resultItem)
+	}
+
 	resp.JSONResponse(&shortenBatchRes, w, http.StatusCreated)
 }

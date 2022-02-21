@@ -14,21 +14,17 @@ func TestURLWithSha256(t *testing.T) {
 		want string
 	}{
 		{
-			name: "practicum",
 			URL:  "https://practicum.yandex.ru/",
 			want: "42b3e75",
 		},
 		{
-			name: "go.dev",
 			URL:  "https://go.dev/",
 			want: "ba6e07b",
 		},
 	}
 	theHasher := hasher.NewNaiveHasher()
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			val := theHasher.Hash(tt.URL)
-			assert.Equal(t, tt.want, val)
-		})
+		val := theHasher.Hash(tt.URL)
+		assert.Equal(t, tt.want, val)
 	}
 }

@@ -76,6 +76,24 @@ func TestUnableToSaveURLToDatabaseStorageEmptyUser(t *testing.T) {
 	assert.Equal(t, "https://go.dev/", getRowForShortID(db, "bar").LongURL)
 }
 
+func TestSaveURLToDatabaseStorageConflict(t *testing.T) {
+	ctx := context.TODO()
+	theStorage := getDatabaseStorage(t)
+	db := theStorage.DB
+
+	shortID, err := theStorage.Set(ctx, "foo", "https://go.dev/", "user1")
+	assert.Equal(t, "foo", shortID)
+	assert.Nil(t, err)
+	assert.Equal(t, "https://go.dev/", getRowForShortID(db, "foo").LongURL)
+
+	for _, userID := range []string{"user1", "user2"} {
+		shortID, err = theStorage.Set(ctx, "bar", "https://go.dev/", userID)
+		assert.Equal(t, "foo", shortID)
+		assert.ErrorIs(t, storage.ErrURLAlreadyExists, err)
+		assert.Nil(t, getRowForShortID(db, "bar"))
+	}
+}
+
 func TestGetURLFromDatabaseStorage(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -111,10 +129,10 @@ func TestGetURLFromDatabaseStorage(t *testing.T) {
 			longURL, err := theStorage.Get(ctx, tt.key)
 			if tt.isErr {
 				assert.Error(t, err)
-				assert.Equal(t, "", longURL)
+				assert.Equal(t, "", longURL, tt.name)
 			} else {
-				assert.Equal(t, tt.result, longURL)
 				assert.NoError(t, err)
+				assert.Equal(t, tt.result, longURL, tt.name)
 			}
 		})
 	}
@@ -127,9 +145,9 @@ func TestGetUserURLsFromDatabaseStorage(t *testing.T) {
 
 	theStorage.Set(ctx, "foo", "https://practicum.yandex.ru/", user1) // nolint: errcheck
 	theStorage.Set(ctx, "bar", "https://go.dev/", user1)              // nolint: errcheck
-	theStorage.Set(ctx, "foo", "https://google.com/", user2)          // nolint: errcheck
+	theStorage.Set(ctx, "ham", "https://google.com/", user2)          // nolint: errcheck
 	theStorage.Set(ctx, "baz", "https://exampe.com/", user2)          // nolint: errcheck
-	theStorage.Set(ctx, "ham", "https://wikipedia.org/", "")          // nolint: errcheck
+	theStorage.Set(ctx, "eggs", "https://wikipedia.org/", "")         // nolint: errcheck
 
 	user1Items, _ := theStorage.GetURLsByUserID(ctx, user1)
 	assert.Len(t, user1Items, 2)
@@ -138,9 +156,40 @@ func TestGetUserURLsFromDatabaseStorage(t *testing.T) {
 
 	user2Items, _ := theStorage.GetURLsByUserID(ctx, user2)
 	assert.Len(t, user2Items, 2)
-	assert.Contains(t, user2Items, "foo")
+	assert.Contains(t, user2Items, "ham")
 	assert.Contains(t, user2Items, "baz")
 
 	emptyUserItems, _ := theStorage.GetURLsByUserID(ctx, "")
 	assert.Len(t, emptyUserItems, 0)
+}
+
+func TestSaveURLsToDatabaseBatch(t *testing.T) {
+	ctx := context.TODO()
+	theStorage := getDatabaseStorage(t)
+	theStorage.Set(ctx, "wiki", "https://wikipedia.org/", "u2") // nolint: errcheck
+
+	batchItems := []storage.BatchItem{
+		{"ya", "https://ya.ru", "u1"},
+		{"ya", "https://ya.ru", "u1"}, // дубль предыдущей строки
+		{"go", "https://go.dev/", "u1"},
+		{"go", "https://golang.org/", "u1"}, // дубль идентификатора с предыдущей строки
+		{"foo", "https://example.com/", "u1"},
+		{"bar", "https://practicum.yandex.ru/", "u1"},
+		{"ham", "https://practicum.yandex.ru/", "u1"}, // дубль длинного URL с предыдущей строки
+		{"new", "https://wikipedia.org/", "u1"},       // дубль длинного URL существующей записи в бд
+	}
+	result, err := theStorage.SaveBatch(ctx, batchItems)
+	assert.NoError(t, err)
+	assert.Len(t, result, 5)
+	assert.Equal(t, result["https://wikipedia.org/"], "wiki")
+	assert.Equal(t, result["https://practicum.yandex.ru/"], "bar")
+	assert.Equal(t, result["https://example.com/"], "foo")
+	assert.Equal(t, result["https://go.dev/"], "go")
+	assert.Equal(t, result["https://ya.ru"], "ya")
+	assert.NotContains(t, result, "https://golang.org/")
+}
+
+func TestDatabaseStoragePing(t *testing.T) {
+	theStorage := getDatabaseStorage(t)
+	assert.Nil(t, theStorage.Ping(context.TODO()))
 }

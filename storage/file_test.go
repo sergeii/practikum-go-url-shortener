@@ -72,10 +72,10 @@ func TestGetURLFromFileStorage(t *testing.T) {
 	ctx := context.TODO()
 	theStorage, closeFunc := getTestFileStorage()
 	defer closeFunc()
+	theStorage.Set(ctx, "foo", "https://practicum.yandex.ru/", "") // nolint: errcheck
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			theStorage.Set(ctx, "foo", "https://practicum.yandex.ru/", "") // nolint: errcheck
 			longURL, err := theStorage.Get(ctx, tt.key)
 			if tt.isErr {
 				assert.Error(t, err)
