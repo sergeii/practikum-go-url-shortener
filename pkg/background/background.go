@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -89,12 +90,15 @@ func NewPool(cfg PoolConfig) *Pool {
 
 	// инициализируем воркеров и управляем каналами в отдельной горутине
 	go func() {
+		wg := &sync.WaitGroup{}
 		ctx, cancel := context.WithCancel(context.Background())
 		for i := 0; i < cfg.Concurrency; i++ {
-			pool.addWorker(ctx, queue, results)
+			wg.Add(1)
+			go pool.addWorker(ctx, wg, queue, results)
 		}
 		<-done
 		cancel()
+		wg.Wait()
 		close(queue)
 		close(results)
 	}()
@@ -130,19 +134,17 @@ func (pool *Pool) Close() {
 	close(pool.done)
 }
 
-func (pool *Pool) addWorker(ctx context.Context, queue <-chan Job, results chan<- JobResult) *Worker {
+func (pool *Pool) addWorker(ctx context.Context, wg *sync.WaitGroup, queue <-chan Job, results chan<- JobResult) {
 	worker := Worker{JobTimeout: pool.cfg.DoJobTimeout}
-	go func() {
-		for {
-			select {
-			case job := <-queue:
-				log.Printf("obtained new job %s [%s] from queue", job.Name, job.ID)
-				results <- worker.Work(ctx, job)
-			case <-ctx.Done():
-				log.Printf("worker exited due to canceled context")
-				return
-			}
+	defer wg.Done()
+	for {
+		select {
+		case job := <-queue:
+			log.Printf("obtained new job %s [%s] from queue", job.Name, job.ID)
+			results <- worker.Work(ctx, job)
+		case <-ctx.Done():
+			log.Printf("worker exited due to canceled context")
+			return
 		}
-	}()
-	return &worker
+	}
 }
