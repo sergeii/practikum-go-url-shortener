@@ -1,13 +1,13 @@
-package hasher_test
+package shortener_test
 
 import (
 	"testing"
 
-	"github.com/sergeii/practikum-go-url-shortener/pkg/url/hasher"
+	"github.com/sergeii/practikum-go-url-shortener/pkg/url/shortener"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestURLWithSha256(t *testing.T) {
+func TestShaShortener(t *testing.T) {
 	tests := []struct {
 		name string
 		URL  string
@@ -22,9 +22,9 @@ func TestURLWithSha256(t *testing.T) {
 			want: "ba6e07b",
 		},
 	}
-	theHasher := hasher.NewNaiveHasher()
+	theShortener := shortener.NewShaShortener()
 	for _, tt := range tests {
-		val := theHasher.Hash(tt.URL)
+		val := theShortener.Shorten(tt.URL)
 		assert.Equal(t, tt.want, val)
 	}
 }

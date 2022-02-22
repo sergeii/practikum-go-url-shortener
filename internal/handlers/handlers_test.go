@@ -14,6 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v4"
+	"github.com/sergeii/practikum-go-url-shortener/pkg/random"
+
 	"github.com/sergeii/practikum-go-url-shortener/internal/app"
 	"github.com/sergeii/practikum-go-url-shortener/internal/handlers"
 	"github.com/sergeii/practikum-go-url-shortener/internal/middleware"
@@ -39,7 +42,6 @@ func setAuthCookie(r *http.Request, secretKey []byte, userID string) *http.Cooki
 	return cookie
 }
 
-// nolint:unparam
 func prepareTestServer(t *testing.T, overrides ...app.Override) (*httptest.Server, *app.App) {
 	var fileStoragePath string
 	// для того чтобы тесты не мешали друг другу при установленной env-переменной FILE_STORAGE_PATH
@@ -54,20 +56,37 @@ func prepareTestServer(t *testing.T, overrides ...app.Override) (*httptest.Serve
 		}
 		return nil
 	})
-	shorterner, err := app.New(overrides...)
+	// аналогично для DATABASE_DSN подставляем рандомно сгенерированную схему (search path),
+	// предварительно ее создав, используя подключение к бд через оригинальный dsn
+	overrides = append(overrides, func(cfg *app.Config) error {
+		if cfg.DatabaseDSN != "" {
+			schema := random.String(5, "abcdefghijklmnopqrstuvwxyz")
+			db, err := pgx.Connect(context.TODO(), cfg.DatabaseDSN)
+			if err != nil {
+				return err
+			}
+			defer db.Close(context.TODO())
+			if _, err := db.Exec(context.TODO(), "CREATE SCHEMA "+schema); err != nil {
+				return err
+			}
+			cfg.DatabaseDSN += "?search_path=" + schema
+		}
+		return nil
+	})
+	shortener, err := app.New(overrides...)
 	if err != nil {
 		panic(err)
 	}
-	ts := httptest.NewServer(router.New(shorterner))
+	ts := httptest.NewServer(router.New(shortener))
 	t.Cleanup(func() {
 		if fileStoragePath != "" {
 			os.Remove(fileStoragePath)
 		}
 	})
 	t.Cleanup(ts.Close)
-	t.Cleanup(shorterner.Close)
-	t.Cleanup(shorterner.Cleanup)
-	return ts, shorterner
+	t.Cleanup(shortener.Close)
+	t.Cleanup(shortener.Cleanup)
+	return ts, shortener
 }
 
 func doTestRequest(t *testing.T, ts *httptest.Server, method, path string, body io.Reader) (*http.Response, string) {
@@ -105,7 +124,7 @@ func TestShortenAndExpandAnyLengthURLs(t *testing.T) {
 
 		// Получаем относительный url, состоящий из 7 символов, и пробуем перейти по нему
 		parsed, _ := url.Parse(body)
-		assert.Len(t, strings.Trim(parsed.Path, "/"), 7)
+		assert.Len(t, strings.Trim(parsed.Path, "/"), 11)
 		resp, _ = doTestRequest(t, ts, http.MethodGet, parsed.Path, nil)
 		resp.Body.Close()
 		// Получем ожидаем редирект на оригинальный url
@@ -244,7 +263,7 @@ func TestShortenEndpointSupportsCustomizableBaseURL(t *testing.T) {
 			shortener.Config.BaseURL = *testBaseURL
 			resp, body := doTestRequest(t, ts, http.MethodPost, "/", strings.NewReader("https://ya.ru/"))
 			resp.Body.Close()
-			assert.Equal(t, tt.want, body[:len(body)-7])
+			assert.Equal(t, tt.want, body[:len(body)-11])
 		})
 	}
 }
@@ -277,7 +296,7 @@ func TestAPIShortenAndExpandURLs(t *testing.T) {
 		var resultJSON ShortenResultBody
 		json.Unmarshal([]byte(body), &resultJSON) // nolint:errcheck
 		parsed, _ := url.Parse(resultJSON.Result)
-		assert.Len(t, strings.Trim(parsed.Path, "/"), 7)
+		assert.Len(t, strings.Trim(parsed.Path, "/"), 11)
 		resp, _ = doTestRequest(t, ts, http.MethodGet, parsed.Path, nil)
 		resp.Body.Close()
 		// Получем ожидаем редирект на оригинальный url
@@ -286,11 +305,11 @@ func TestAPIShortenAndExpandURLs(t *testing.T) {
 	}
 }
 
-func TestAPIShortenEndpointHandlesDuplicateURLs(t *testing.T) {
+func TestAPIShortenEndpointHandlesExistingURLs(t *testing.T) {
 	var resultJSON1, resultJSON2 handlers.APIShortenResult
 
-	ts, shorterner := prepareTestServer(t)
-	if shorterner.DB == nil {
+	ts, shortener := prepareTestServer(t)
+	if shortener.DB == nil {
 		t.Skip("Skipping test because it requires db")
 	}
 
@@ -410,6 +429,34 @@ func TestAPIShortenEndpointRequiresValidJSON(t *testing.T) {
 	}
 }
 
+func TestShortenAndExpandEndpointHandleDeletedURLs(t *testing.T) {
+	ctx := context.TODO()
+	ts, shortener := prepareTestServer(t)
+
+	shortener.Storage.Set(ctx, "go", "https://go.dev/", "user1") // nolint: errcheck
+	shortener.Storage.Set(ctx, "ya", "https://ya.ru/", "user1")  // nolint: errcheck
+
+	shortener.Storage.DeleteUserURLs(context.TODO(), "user1", "go") // nolint: errcheck
+
+	resp, _ := doTestRequest(t, ts, http.MethodGet, "/ya", nil)
+	resp.Body.Close()
+	assert.Equal(t, 307, resp.StatusCode)
+
+	resp, _ = doTestRequest(t, ts, http.MethodGet, "/go", nil)
+	resp.Body.Close()
+	assert.Equal(t, 410, resp.StatusCode)
+
+	// удаленный url можно снова сократить
+	resp, _ = doTestRequest(t, ts, http.MethodPost, "/", strings.NewReader("https://go.dev/"))
+	resp.Body.Close()
+	assert.Equal(t, 201, resp.StatusCode)
+
+	// а неудаленный - нельзя
+	resp, _ = doTestRequest(t, ts, http.MethodPost, "/", strings.NewReader("https://ya.ru/"))
+	resp.Body.Close()
+	assert.Equal(t, 409, resp.StatusCode)
+}
+
 func TestExpandEndpointRequiresShortURLID(t *testing.T) {
 	ts, _ := prepareTestServer(t)
 	resp, _ := doTestRequest(t, ts, http.MethodGet, "/", nil)
@@ -444,8 +491,8 @@ func TestExpandEndpointRequiresProperID(t *testing.T) {
 		},
 	}
 
-	ts, shorterner := prepareTestServer(t)
-	shorterner.Storage.Set(context.TODO(), "gogogo", "https://go.dev/", "user1") // nolint: errcheck
+	ts, shortener := prepareTestServer(t)
+	shortener.Storage.Set(context.TODO(), "gogogo", "https://go.dev/", "user1") // nolint: errcheck
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -462,30 +509,41 @@ func TestExpandEndpointRequiresProperID(t *testing.T) {
 }
 
 func TestSetAndGetUserURLS(t *testing.T) {
-	ts, shorterner := prepareTestServer(t)
+	ts, shortener := prepareTestServer(t)
 	testURLs := []string{"https://ya.ru", "https://go.dev/"}
-	authCookie := setAuthCookie(nil, shorterner.SecretKey, "user1")
+	authCookie := setAuthCookie(nil, shortener.SecretKey, "user1")
 	for _, testURL := range testURLs {
-		req, _ := http.NewRequest("POST", ts.URL+"/", strings.NewReader(testURL))
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(testURL))
 		req.AddCookie(authCookie)
 		resp, _ := http.DefaultClient.Do(req)
 		resp.Body.Close()
 		assert.Equal(t, 201, resp.StatusCode)
 	}
 
-	req, _ := http.NewRequest("GET", ts.URL+"/api/user/urls", nil)
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/user/urls", nil)
 	req.AddCookie(authCookie)
 	resp, _ := http.DefaultClient.Do(req)
 	body, _ := ioutil.ReadAll(resp.Body)
 	resp.Body.Close()
 	jsonItems := make([]handlers.APIUserURLItem, 0)
 	json.Unmarshal(body, &jsonItems) // nolint:errcheck
+	shortUserIDs := make([]string, 0)
 	longUserURLs := make([]string, 0)
 	for _, item := range jsonItems {
+		parsed, _ := url.Parse(item.ShortURL)
+		shortUserIDs = append(shortUserIDs, parsed.Path[1:])
 		longUserURLs = append(longUserURLs, item.OriginalURL)
 	}
 	assert.ElementsMatch(t, testURLs, longUserURLs)
 	assert.Equal(t, 200, resp.StatusCode)
+
+	// после удаления всех ссылок эндпоинт вернет 204
+	shortener.Storage.DeleteUserURLs(context.TODO(), "user1", shortUserIDs...) // nolint:errcheck
+	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/api/user/urls", nil)
+	req.AddCookie(authCookie)
+	resp, _ = http.DefaultClient.Do(req)
+	resp.Body.Close()
+	assert.Equal(t, 204, resp.StatusCode)
 }
 
 func TestGetUserURLs(t *testing.T) {
@@ -517,16 +575,16 @@ func TestGetUserURLs(t *testing.T) {
 	}
 
 	ctx := context.TODO()
-	ts, shorterner := prepareTestServer(t)
-	shorterner.Storage.Set(ctx, "go", "https://go.dev/", "user1")         // nolint: errcheck
-	shorterner.Storage.Set(ctx, "ya", "https://ya.ru/", "user1")          // nolint: errcheck
-	shorterner.Storage.Set(ctx, "imdb", "https://www.imdb.com/", "user2") // nolint: errcheck
+	ts, shortener := prepareTestServer(t)
+	shortener.Storage.Set(ctx, "go", "https://go.dev/", "user1")         // nolint: errcheck
+	shortener.Storage.Set(ctx, "ya", "https://ya.ru/", "user1")          // nolint: errcheck
+	shortener.Storage.Set(ctx, "imdb", "https://www.imdb.com/", "user2") // nolint: errcheck
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req, _ := http.NewRequest("GET", ts.URL+"/api/user/urls", nil)
+			req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/user/urls", nil)
 			if tt.userID != "" {
-				setAuthCookie(req, shorterner.SecretKey, tt.userID)
+				setAuthCookie(req, shortener.SecretKey, tt.userID)
 			}
 			resp, _ := http.DefaultClient.Do(req)
 			body, _ := ioutil.ReadAll(resp.Body)
@@ -628,4 +686,106 @@ func TestAPIShortenBatchNoItemsToProcess(t *testing.T) {
 	resp, _ := doTestRequest(t, ts, http.MethodPost, "/api/shorten/batch", bytes.NewReader(reqJSON))
 	resp.Body.Close()
 	require.Equal(t, 400, resp.StatusCode)
+}
+
+func TestAPIDeleteUserURLs(t *testing.T) {
+	ctx := context.TODO()
+	ts, shortener := prepareTestServer(t)
+
+	shortener.Storage.Set(ctx, "wiki", "https://wikipedia.org/", "u1")      // nolint: errcheck
+	shortener.Storage.Set(ctx, "go", "https://go.dev/", "u1")               // nolint: errcheck
+	shortener.Storage.Set(ctx, "foo", "https://example.com/", "u2")         // nolint: errcheck
+	shortener.Storage.Set(ctx, "ya", "https://ya.ru", "u3")                 // nolint: errcheck
+	shortener.Storage.Set(ctx, "bar", "https://practicum.yandex.ru/", "u1") // nolint: errcheck
+
+	authCookie := setAuthCookie(nil, shortener.SecretKey, "u1")
+	reqJSON, _ := json.Marshal([]string{"wiki", "go", "foo", "ya", "bar", "unknown"}) // nolint:errchkjson
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/user/urls", bytes.NewReader(reqJSON))
+	req.AddCookie(authCookie)
+	resp, _ := http.DefaultClient.Do(req)
+	resp.Body.Close()
+	assert.Equal(t, 202, resp.StatusCode)
+
+	expected := map[string]int{
+		"wiki": 410,
+		"go":   410,
+		"bar":  410,
+		"foo":  307, // нельзя удалять чужие ссылки
+		"ya":   307, // тоже
+	}
+	for shortID, wantStatus := range expected {
+		resp, _ := doTestRequest(t, ts, http.MethodGet, "/"+shortID, nil)
+		resp.Body.Close()
+		assert.Equal(t, wantStatus, resp.StatusCode)
+	}
+}
+
+func TestAPIDeleteUserURLsHandleBadRequest(t *testing.T) {
+	ts, _ := prepareTestServer(t)
+
+	tests := []struct {
+		name  string
+		body  string
+		isErr bool
+	}{
+		{
+			name:  "positive case",
+			body:  `["foobar"]`,
+			isErr: false,
+		},
+		{
+			name:  "positive case - empty array",
+			body:  `[]`,
+			isErr: false,
+		},
+		{
+			name:  "empty body",
+			body:  ``,
+			isErr: true,
+		},
+		{
+			name:  "wrong type body",
+			body:  `{"key": "value"}`,
+			isErr: true,
+		},
+		{
+			name:  "wrong type array",
+			body:  `[100500]`,
+			isErr: true,
+		},
+		{
+			name:  "invalid json",
+			body:  `]1[`,
+			isErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp, _ := doTestRequest(t, ts, http.MethodDelete, "/api/user/urls", strings.NewReader(tt.body))
+			resp.Body.Close()
+			if tt.isErr {
+				assert.Equal(t, 400, resp.StatusCode)
+			} else {
+				assert.Equal(t, 202, resp.StatusCode)
+			}
+		})
+	}
+}
+
+func TestAPIDeleteUserURLsQueueIsFullError(t *testing.T) {
+	// эмулируем полную очередь, заблокировав навечно запись в канал из-за отсутствия воркеров
+	ts, shortener := prepareTestServer(t, func(cfg *app.Config) error {
+		cfg.BackgroundWorkerConcurrency = 0
+		return nil
+	})
+
+	shortener.Storage.Set(context.TODO(), "wiki", "https://wikipedia.org/", "u1") // nolint: errcheck
+
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/user/urls", strings.NewReader(`["wiki"]`))
+	authCookie := setAuthCookie(nil, shortener.SecretKey, "u1")
+	req.AddCookie(authCookie)
+	resp, _ := http.DefaultClient.Do(req)
+	resp.Body.Close()
+	assert.Equal(t, 503, resp.StatusCode)
 }

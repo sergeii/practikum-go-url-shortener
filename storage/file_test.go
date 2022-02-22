@@ -158,7 +158,7 @@ func TestFileStorageIsAbleToStartWithoutFile(t *testing.T) {
 
 	f, _ := os.Open(filename)
 	defer f.Close()
-	savedItems := make(map[string]map[string]string)
+	savedItems := make(map[string]map[string]interface{})
 	err = json.NewDecoder(f).Decode(&savedItems)
 	assert.NoError(t, err)
 	assert.Equal(t, "https://go.dev/", savedItems["foo"]["LongURL"])
@@ -176,7 +176,7 @@ func TestFileStorageIsAbleToStartWithEmptyFile(t *testing.T) {
 
 	f, _ = os.Open(f.Name())
 	defer f.Close()
-	savedItems := make(map[string]map[string]string)
+	savedItems := make(map[string]map[string]interface{})
 	err = json.NewDecoder(f).Decode(&savedItems)
 	assert.NoError(t, err)
 	assert.Equal(t, "https://go.dev/", savedItems["foo"]["LongURL"])
@@ -213,4 +213,10 @@ func TestFileStorageDoesNotEscapeHTMLChars(t *testing.T) {
 	defer f.Close()
 	json.NewDecoder(f).Decode(&savedItems) // nolint:errcheck
 	assert.Equal(t, "https://yandex.ru/search/?lr=213&text=golang", savedItems["foo"]["LongURL"])
+}
+
+func TestFileStoragePing(t *testing.T) {
+	theStorage, closeFunc := getTestFileStorage()
+	defer closeFunc()
+	assert.Nil(t, theStorage.Ping(context.TODO()))
 }

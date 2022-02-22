@@ -1,19 +1,19 @@
-package hasher
+package shortener
 
 import (
 	"crypto/sha256"
 	"encoding/hex"
 )
 
-type NaiveHasher struct{}
+type ShaShortener struct{}
 
 const shortHashLength = 7
 
-func NewNaiveHasher() *NaiveHasher {
-	return &NaiveHasher{}
+func NewShaShortener() *ShaShortener {
+	return &ShaShortener{}
 }
 
-func (h NaiveHasher) Hash(s string) string {
+func (h ShaShortener) Shorten(s string) string {
 	algo := sha256.New()
 	algo.Write([]byte(s))
 	longURLSha := hex.EncodeToString(algo.Sum(nil))

@@ -9,11 +9,11 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/sergeii/practikum-go-url-shortener/pkg/http/resp"
-
 	"github.com/go-chi/chi/v5"
 	"github.com/sergeii/practikum-go-url-shortener/internal/app"
+	"github.com/sergeii/practikum-go-url-shortener/internal/jobs"
 	"github.com/sergeii/practikum-go-url-shortener/internal/middleware"
+	"github.com/sergeii/practikum-go-url-shortener/pkg/http/resp"
 	"github.com/sergeii/practikum-go-url-shortener/storage"
 )
 
@@ -39,8 +39,10 @@ func (handler Handler) shortenAndSaveLongURL(longURL string, r *http.Request) (*
 	}
 	created := true
 	// Получаем короткий идентификатор для ссылки и кладем пару в хранилище
-	proposedShortID := handler.App.Hasher.Hash(longURL)
-	shortID, err := handler.App.Storage.Set(r.Context(), proposedShortID, longURL, userID)
+	proposedShortID := handler.App.Shortener.Shorten(longURL)
+	// При попытке сохранить уже сокращенный урл можем получить конфликт
+	// и актуальный для этой ссылки короткий идентификатор
+	actualShortID, err := handler.App.Storage.Set(r.Context(), proposedShortID, longURL, userID)
 	if err != nil {
 		if errors.Is(err, storage.ErrURLAlreadyExists) {
 			created = false
@@ -48,7 +50,7 @@ func (handler Handler) shortenAndSaveLongURL(longURL string, r *http.Request) (*
 			return nil, false, err
 		}
 	}
-	shortURL := handler.constructShortURL(shortID)
+	shortURL := handler.constructShortURL(actualShortID)
 	return shortURL, created, nil
 }
 
@@ -97,10 +99,13 @@ func (handler Handler) ExpandURL(w http.ResponseWriter, r *http.Request) {
 	}
 	longURL, err := handler.App.Storage.Get(r.Context(), shortURLID)
 	if err != nil {
-		if errors.Is(err, storage.ErrURLNotFound) {
+		switch {
+		case errors.Is(err, storage.ErrURLNotFound):
 			// Короткая ссылка не найдена в хранилище - ожидаемое поведение, возвращаем 404
 			http.Error(w, err.Error(), http.StatusNotFound)
-		} else {
+		case errors.Is(err, storage.ErrURLIsDeleted):
+			http.Error(w, "url is deleted", http.StatusGone)
+		default:
 			// Другая проблема с хранилищем
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
@@ -172,6 +177,29 @@ func (handler Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 	resp.JSONResponse(&jsonItems, w, http.StatusOK)
 }
 
+func (handler Handler) DeleteUserURLs(w http.ResponseWriter, r *http.Request) {
+	var userShortIDs []string
+	user, ok := r.Context().Value(middleware.AuthContextKey).(*middleware.AuthUser)
+	if !ok {
+		http.Error(w, "not authenticated", http.StatusForbidden)
+		return
+	}
+	// Получили невалидный json
+	if err := json.NewDecoder(r.Body).Decode(&userShortIDs); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	backgroundJob := jobs.DeleteUserURLs(handler.App.Storage, user.ID, userShortIDs...)
+	if err := handler.App.Jobs.Add(r.Context(), backgroundJob); err != nil {
+		// не удалось добавить задачу в очередь в разумное время. Очередь полна?
+		// просим клиента попробовать еще раз, вернув ему 503
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
+	w.Write([]byte("OK")) // nolint:errcheck
+}
+
 // Ping проверяет статус хранилища и возвращает 200 OK в случае успешной проверки
 // В случае наличия проблем с подключением или ошибкой, связанной с превышением времени ожидания ответа,
 // возвращает ошибку 500
@@ -209,7 +237,7 @@ func (handler Handler) APIShortenBatch(w http.ResponseWriter, r *http.Request) {
 		if reqItem.OriginalURL == "" {
 			continue
 		}
-		shortID := handler.App.Hasher.Hash(reqItem.OriginalURL)
+		shortID := handler.App.Shortener.Shorten(reqItem.OriginalURL)
 		batchItem := storage.BatchItem{ShortID: shortID, LongURL: reqItem.OriginalURL, UserID: user.ID}
 		batchItems = append(batchItems, batchItem)
 		// запоминаем соответствие correlation и сокращаемой ссылки для последующего ответа

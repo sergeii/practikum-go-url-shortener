@@ -119,10 +119,18 @@ func TestGetURLFromDatabaseStorage(t *testing.T) {
 			isErr:  true,
 			result: "",
 		},
+		{
+			name:   "deleted url",
+			key:    "go",
+			isErr:  true,
+			result: "",
+		},
 	}
 	ctx := context.TODO()
 	theStorage := getDatabaseStorage(t)
-	theStorage.Set(ctx, "foo", "https://practicum.yandex.ru/", "user1") // nolint: errcheck
+	theStorage.Set(ctx, "foo", "https://practicum.yandex.ru/", "user1")                // nolint: errcheck
+	theStorage.Set(ctx, "go", "https://go.dev/", "user1")                              // nolint: errcheck
+	theStorage.DB.Exec(ctx, "UPDATE urls SET is_deleted = true WHERE short_id = 'go'") // nolint: errcheck
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -161,6 +169,12 @@ func TestGetUserURLsFromDatabaseStorage(t *testing.T) {
 
 	emptyUserItems, _ := theStorage.GetURLsByUserID(ctx, "")
 	assert.Len(t, emptyUserItems, 0)
+
+	theStorage.DB.Exec(ctx, "UPDATE urls SET is_deleted = true WHERE short_id = 'foo'") // nolint: errcheck
+	updatedUser1Items, _ := theStorage.GetURLsByUserID(ctx, user1)
+	assert.Len(t, updatedUser1Items, 1)
+	assert.NotContains(t, updatedUser1Items, "foo")
+	assert.Contains(t, updatedUser1Items, "bar")
 }
 
 func TestSaveURLsToDatabaseBatch(t *testing.T) {
@@ -170,9 +184,7 @@ func TestSaveURLsToDatabaseBatch(t *testing.T) {
 
 	batchItems := []storage.BatchItem{
 		{"ya", "https://ya.ru", "u1"},
-		{"ya", "https://ya.ru", "u1"}, // дубль предыдущей строки
 		{"go", "https://go.dev/", "u1"},
-		{"go", "https://golang.org/", "u1"}, // дубль идентификатора с предыдущей строки
 		{"foo", "https://example.com/", "u1"},
 		{"bar", "https://practicum.yandex.ru/", "u1"},
 		{"ham", "https://practicum.yandex.ru/", "u1"}, // дубль длинного URL с предыдущей строки
@@ -187,6 +199,42 @@ func TestSaveURLsToDatabaseBatch(t *testing.T) {
 	assert.Equal(t, result["https://go.dev/"], "go")
 	assert.Equal(t, result["https://ya.ru"], "ya")
 	assert.NotContains(t, result, "https://golang.org/")
+}
+
+func TestDeleteUserURLsFromDatabaseBatch(t *testing.T) {
+	ctx := context.TODO()
+	theStorage := getDatabaseStorage(t)
+	theStorage.Set(ctx, "wiki", "https://wikipedia.org/", "u1")      // nolint: errcheck
+	theStorage.Set(ctx, "go", "https://go.dev/", "u1")               // nolint: errcheck
+	theStorage.Set(ctx, "foo", "https://example.com/", "u2")         // nolint: errcheck
+	theStorage.Set(ctx, "ya", "https://ya.ru", "u3")                 // nolint: errcheck
+	theStorage.Set(ctx, "bar", "https://practicum.yandex.ru/", "u1") // nolint: errcheck
+
+	err := theStorage.DeleteUserURLs(ctx, "u1", "wiki", "go", "foo", "ya", "bar", "unknown")
+	assert.NoError(t, err)
+
+	u1Items, _ := theStorage.GetURLsByUserID(ctx, "u1")
+	assert.Len(t, u1Items, 0)
+	_, err = theStorage.Get(ctx, "go")
+	assert.ErrorIs(t, storage.ErrURLIsDeleted, err)
+
+	u2Items, _ := theStorage.GetURLsByUserID(ctx, "u2")
+	assert.Len(t, u2Items, 1)
+	url, err := theStorage.Get(ctx, "foo")
+	assert.NoError(t, err)
+	assert.Equal(t, "https://example.com/", url)
+
+	u3Items, _ := theStorage.GetURLsByUserID(ctx, "u3")
+	assert.Len(t, u3Items, 1)
+
+	// можно снова сохранить ссылку без конфликтов
+	shortID, err := theStorage.Set(ctx, "wikinew", "https://wikipedia.org/", "u1")
+	assert.NoError(t, err)
+	assert.Equal(t, "wikinew", shortID)
+	// и под другим пользователем
+	shortID, err = theStorage.Set(ctx, "gonew", "https://go.dev/", "u2")
+	assert.NoError(t, err)
+	assert.Equal(t, "gonew", shortID)
 }
 
 func TestDatabaseStoragePing(t *testing.T) {

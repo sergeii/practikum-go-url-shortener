@@ -11,8 +11,9 @@ import (
 )
 
 type FileURLItem struct {
-	LongURL string
-	UserID  string
+	LongURL   string
+	UserID    string
+	IsDeleted bool
 }
 
 type FileURLStorerBackend struct {
@@ -62,17 +63,16 @@ func NewFileURLStorerBackend(filename string) (*FileURLStorerBackend, error) {
 	return &backend, nil
 }
 
-func (backend *FileURLStorerBackend) Set(ctx context.Context, shortURLID, longURL, userID string) (string, error) {
+func (backend *FileURLStorerBackend) Set(ctx context.Context, shortID, longURL, userID string) (string, error) {
 	backend.mu.Lock()
 	defer backend.mu.Unlock()
-	// Для консистентности с бд-бэкендом поддерживаем проверку на уникальность ссылок
-	existingID, exists := backend.created[longURL]
+	actualShortID, exists := backend.created[longURL]
 	if exists {
-		return existingID, ErrURLAlreadyExists
+		return actualShortID, ErrURLAlreadyExists
 	}
-	backend.cache[shortURLID] = FileURLItem{longURL, userID}
-	backend.created[longURL] = shortURLID
-	return shortURLID, nil
+	backend.cache[shortID] = FileURLItem{LongURL: longURL, UserID: userID}
+	backend.created[longURL] = shortID
+	return shortID, nil
 }
 
 func (backend *FileURLStorerBackend) Get(ctx context.Context, shortURLID string) (string, error) {
@@ -81,6 +81,8 @@ func (backend *FileURLStorerBackend) Get(ctx context.Context, shortURLID string)
 	item, found := backend.cache[shortURLID]
 	if !found {
 		return "", ErrURLNotFound
+	} else if item.IsDeleted {
+		return "", ErrURLIsDeleted
 	}
 	return item.LongURL, nil
 }
@@ -93,11 +95,28 @@ func (backend *FileURLStorerBackend) GetURLsByUserID(ctx context.Context, userID
 		return items, nil
 	}
 	for shortURL, item := range backend.cache {
-		if item.UserID == userID {
+		if item.UserID == userID && !item.IsDeleted {
 			items[shortURL] = item.LongURL
 		}
 	}
 	return items, nil
+}
+
+func (backend *FileURLStorerBackend) DeleteUserURLs(ctx context.Context, userID string, shortIDs ...string) error {
+	backend.mu.Lock()
+	defer backend.mu.Unlock()
+	// не позволяем анонимам удалять ссылки других анонимов
+	if userID == "" {
+		return nil
+	}
+	for _, shortID := range shortIDs {
+		if item, ok := backend.cache[shortID]; ok && item.UserID == userID {
+			item.IsDeleted = true
+			backend.cache[shortID] = item
+			delete(backend.created, item.LongURL)
+		}
+	}
+	return nil
 }
 
 func (backend *FileURLStorerBackend) SaveBatch(ctx context.Context, items []BatchItem) (map[string]string, error) {
@@ -109,7 +128,7 @@ func (backend *FileURLStorerBackend) SaveBatch(ctx context.Context, items []Batc
 		if val, exists := backend.created[item.LongURL]; exists {
 			result[item.LongURL] = val
 		} else {
-			backend.cache[item.ShortID] = FileURLItem{item.LongURL, item.UserID}
+			backend.cache[item.ShortID] = FileURLItem{LongURL: item.LongURL, UserID: item.UserID}
 			backend.created[item.LongURL] = item.ShortID
 			result[item.LongURL] = item.ShortID
 		}
