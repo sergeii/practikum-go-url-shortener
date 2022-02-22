@@ -88,6 +88,28 @@ func TestGetURLFromFileStorage(t *testing.T) {
 	}
 }
 
+func TestSaveURLToFileStorageConflict(t *testing.T) {
+	ctx := context.TODO()
+	theStorage, closeFunc := getTestFileStorage()
+	defer closeFunc()
+
+	shortID, err := theStorage.Set(ctx, "foo", "https://go.dev/", "user1")
+	assert.Equal(t, "foo", shortID)
+	assert.Nil(t, err)
+	url, err := theStorage.Get(ctx, "foo")
+	assert.Equal(t, "https://go.dev/", url)
+	assert.NoError(t, err)
+
+	for _, userID := range []string{"user1", "user2"} {
+		shortID, err = theStorage.Set(ctx, "bar", "https://go.dev/", userID)
+		assert.Equal(t, "foo", shortID)
+		assert.ErrorIs(t, storage.ErrURLAlreadyExists, err)
+		url, err = theStorage.Get(ctx, "bar")
+		assert.ErrorIs(t, err, storage.ErrURLNotFound)
+		assert.Equal(t, "", url)
+	}
+}
+
 func TestGetUserURLsFromFileStorage(t *testing.T) {
 	ctx := context.TODO()
 	theStorage, closeFunc := getTestFileStorage()
@@ -213,6 +235,69 @@ func TestFileStorageDoesNotEscapeHTMLChars(t *testing.T) {
 	defer f.Close()
 	json.NewDecoder(f).Decode(&savedItems) // nolint:errcheck
 	assert.Equal(t, "https://yandex.ru/search/?lr=213&text=golang", savedItems["foo"]["LongURL"])
+}
+
+func TestBatchSaveURLsToFileStorage(t *testing.T) {
+	ctx := context.TODO()
+	theStorage, closeFunc := getTestFileStorage()
+	defer closeFunc()
+	theStorage.Set(ctx, "wiki", "https://wikipedia.org/", "u2") // nolint: errcheck
+
+	batchItems := []storage.BatchItem{
+		{"ya", "https://ya.ru", "u1"},
+		{"go", "https://go.dev/", "u1"},
+		{"foo", "https://example.com/", "u1"},
+		{"bar", "https://practicum.yandex.ru/", "u1"},
+		{"ham", "https://practicum.yandex.ru/", "u1"}, // дубль длинного URL с предыдущей строки
+		{"new", "https://wikipedia.org/", "u1"},       // дубль длинного URL существующей записи в бд
+	}
+	result, err := theStorage.SaveBatch(ctx, batchItems)
+	assert.NoError(t, err)
+	assert.Len(t, result, 5)
+	assert.Equal(t, result["https://wikipedia.org/"], "wiki")
+	assert.Equal(t, result["https://practicum.yandex.ru/"], "bar")
+	assert.Equal(t, result["https://example.com/"], "foo")
+	assert.Equal(t, result["https://go.dev/"], "go")
+	assert.Equal(t, result["https://ya.ru"], "ya")
+	assert.NotContains(t, result, "https://golang.org/")
+}
+
+func TestBatchDeleteUserURLsFromFileStorage(t *testing.T) {
+	ctx := context.TODO()
+	theStorage, closeFunc := getTestFileStorage()
+	defer closeFunc()
+
+	theStorage.Set(ctx, "wiki", "https://wikipedia.org/", "u1")      // nolint: errcheck
+	theStorage.Set(ctx, "go", "https://go.dev/", "u1")               // nolint: errcheck
+	theStorage.Set(ctx, "foo", "https://example.com/", "u2")         // nolint: errcheck
+	theStorage.Set(ctx, "ya", "https://ya.ru", "u3")                 // nolint: errcheck
+	theStorage.Set(ctx, "bar", "https://practicum.yandex.ru/", "u1") // nolint: errcheck
+
+	err := theStorage.DeleteUserURLs(ctx, "u1", "wiki", "go", "foo", "ya", "bar", "unknown")
+	assert.NoError(t, err)
+
+	u1Items, _ := theStorage.GetURLsByUserID(ctx, "u1")
+	assert.Len(t, u1Items, 0)
+	_, err = theStorage.Get(ctx, "go")
+	assert.ErrorIs(t, storage.ErrURLIsDeleted, err)
+
+	u2Items, _ := theStorage.GetURLsByUserID(ctx, "u2")
+	assert.Len(t, u2Items, 1)
+	url, err := theStorage.Get(ctx, "foo")
+	assert.NoError(t, err)
+	assert.Equal(t, "https://example.com/", url)
+
+	u3Items, _ := theStorage.GetURLsByUserID(ctx, "u3")
+	assert.Len(t, u3Items, 1)
+
+	// можно снова сохранить ссылку без конфликтов
+	shortID, err := theStorage.Set(ctx, "wikinew", "https://wikipedia.org/", "u1")
+	assert.NoError(t, err)
+	assert.Equal(t, "wikinew", shortID)
+	// и под другим пользователем
+	shortID, err = theStorage.Set(ctx, "gonew", "https://go.dev/", "u2")
+	assert.NoError(t, err)
+	assert.Equal(t, "gonew", shortID)
 }
 
 func TestFileStoragePing(t *testing.T) {
