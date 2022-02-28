@@ -6,6 +6,8 @@ import (
 	"log"
 	"time"
 
+	"github.com/lib/pq"
+
 	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
 )
@@ -131,27 +133,14 @@ func (backend DatabaseURLStorerBackend) DeleteUserURLs(ctx context.Context, user
 	ctx, cancel := context.WithTimeout(ctx, backend.timeout)
 	defer cancel()
 
-	tx, err := backend.DB.Begin(ctx)
+	sql := "UPDATE urls SET is_deleted = true WHERE user_id = $1 AND short_id = ANY($2)"
+	result, err := backend.DB.Exec(ctx, sql, userID, pq.Array(shortIDs))
 	if err != nil {
 		return err
 	}
-	defer func(ctx context.Context) {
-		err := tx.Rollback(ctx)
-		if err != nil {
-			log.Printf("failed to rollback transaction due to %v", err)
-		}
-	}(ctx)
 
-	prepSQL := "UPDATE urls SET is_deleted = true WHERE short_id = $1 AND user_id = $2"
-	if _, err := tx.Prepare(ctx, "batch-mark-deleted", prepSQL); err != nil {
-		return err
-	}
-	for _, shortID := range shortIDs {
-		if _, err = tx.Exec(ctx, "batch-mark-deleted", shortID, userID); err != nil {
-			return err
-		}
-	}
-	return tx.Commit(ctx)
+	log.Printf("deleted %d urls for user %s", result.RowsAffected(), userID)
+	return nil
 }
 
 func (backend DatabaseURLStorerBackend) SaveBatch(ctx context.Context, items []BatchItem) (map[string]string, error) {
