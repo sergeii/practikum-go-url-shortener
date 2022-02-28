@@ -21,13 +21,14 @@ func New(theApp *app.App) chi.Router {
 	router.Use(middleware.Recoverer)
 	router.Route("/", func(r chi.Router) {
 		r.Post("/", handler.ShortenURL)
-		r.Get("/user/urls", handler.GetUserURLs)
 		r.Get("/ping", handler.Ping)
-		r.Get("/{slug:[a-z0-9]+}", handler.ExpandURL)
+		r.Get("/{slug:[a-zA-Z0-9_-]+}", handler.ExpandURL)
 	})
 	router.Route("/api", func(r chi.Router) {
 		r.Post("/shorten", handler.APIShortenURL)
 		r.Post("/shorten/batch", handler.APIShortenBatch)
+		r.Get("/user/urls", handler.GetUserURLs)
+		r.Delete("/user/urls", handler.DeleteUserURLs)
 	})
 	return router
 }

@@ -92,3 +92,8 @@ func TestGetUserURLsFromLocmemStorage(t *testing.T) {
 	emptyUserItems, _ := theStorage.GetURLsByUserID(ctx, "")
 	assert.Len(t, emptyUserItems, 0)
 }
+
+func TestLocmemStoragePing(t *testing.T) {
+	theStorage := storage.NewLocmemURLStorerBackend()
+	assert.Nil(t, theStorage.Ping(context.TODO()))
+}

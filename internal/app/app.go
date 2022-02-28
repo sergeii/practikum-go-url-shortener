@@ -11,28 +11,33 @@ import (
 
 	"github.com/caarlos0/env/v6"
 	"github.com/jackc/pgx/v4/pgxpool"
-	"github.com/sergeii/practikum-go-url-shortener/pkg/url/hasher"
+	"github.com/sergeii/practikum-go-url-shortener/pkg/background"
+	"github.com/sergeii/practikum-go-url-shortener/pkg/url/shortener"
 	"github.com/sergeii/practikum-go-url-shortener/storage"
 )
 
 const SecretKeyLength = 32
 
 type Config struct {
-	BaseURL                url.URL       `env:"BASE_URL" envDefault:"http://localhost:8080/"`
-	ServerAddress          string        `env:"SERVER_ADDRESS" envDefault:"localhost:8080"`
-	ServerShutdownTimeout  time.Duration `env:"SERVER_SHUTDOWN_TIMEOUT" envDefault:"5s"`
-	FileStoragePath        string        `env:"FILE_STORAGE_PATH"`
-	SecretKey              string        `env:"SECRET_KEY"`
-	DatabaseDSN            string        `env:"DATABASE_DSN"`
-	DatabaseConnectTimeout time.Duration `env:"DATABASE_CONNECT_TIMEOUT" envDefault:"1s"`
-	DatabaseQueryTimeout   time.Duration `env:"DATABASE_QUERY_TIMEOUT" envDefault:"1s"`
+	BaseURL                     url.URL       `env:"BASE_URL" envDefault:"http://localhost:8080/"`
+	ServerAddress               string        `env:"SERVER_ADDRESS" envDefault:"localhost:8080"`
+	ServerShutdownTimeout       time.Duration `env:"SERVER_SHUTDOWN_TIMEOUT" envDefault:"5s"`
+	FileStoragePath             string        `env:"FILE_STORAGE_PATH"`
+	SecretKey                   string        `env:"SECRET_KEY"`
+	DatabaseDSN                 string        `env:"DATABASE_DSN"`
+	DatabaseConnectTimeout      time.Duration `env:"DATABASE_CONNECT_TIMEOUT" envDefault:"1s"`
+	DatabaseQueryTimeout        time.Duration `env:"DATABASE_QUERY_TIMEOUT" envDefault:"1s"`
+	BackgroundWorkerConcurrency int           `env:"BACKGROUND_WORKER_CONCURRENCY" envDefault:"1"`
+	BackgroundJobTimeout        time.Duration `env:"BACKGROUND_JOB_TIMEOUT" envDefault:"1s"`
+	BackgroundEnqueueTimeout    time.Duration `env:"BACKGROUND_ENQUEUE_TIMEOUT" envDefault:"2s"`
 }
 
 type App struct {
 	Config    *Config
 	Storage   storage.URLStorer
-	Hasher    hasher.Hasher
+	Shortener shortener.Shortener
 	DB        *pgxpool.Pool
+	Jobs      *background.Pool
 	SecretKey []byte
 }
 
@@ -72,9 +77,10 @@ func New(overrides ...Override) (*App, error) {
 
 	app := &App{
 		Storage:   store,
-		Hasher:    hasher.NewNaiveHasher(),
+		Shortener: shortener.NewRandShortener(),
 		Config:    &cfg,
 		DB:        db,
+		Jobs:      configureJobPool(&cfg),
 		SecretKey: secretKey,
 	}
 	return app, nil
@@ -85,9 +91,13 @@ func (app *App) Cleanup() {
 }
 
 func (app *App) Close() {
+	// приостанавливаем выполнение фоновых задач
+	app.Jobs.Close()
+	// корректно завершаем работу с хранилищем
 	if err := app.Storage.Close(); err != nil {
 		log.Printf("failed to close storage %s due to %s; possible data loss", app.Storage, err)
 	}
+	// закрываем подключения к бд
 	if app.DB != nil {
 		app.DB.Close()
 	}
@@ -123,6 +133,7 @@ func configureSecretKey(cfg *Config) ([]byte, error) {
 	return randKey, nil
 }
 
+// configureDatabase подготавливет пул соединений для работы с базой данных
 func configureDatabase(cfg *Config) (*pgxpool.Pool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.DatabaseConnectTimeout)
 	defer cancel()
@@ -131,4 +142,13 @@ func configureDatabase(cfg *Config) (*pgxpool.Pool, error) {
 		return nil, err
 	}
 	return db, nil
+}
+
+// configureJobPool подготавливает пул для выполнения фоновых задач
+func configureJobPool(cfg *Config) *background.Pool {
+	return background.NewPool(background.PoolConfig{
+		Concurrency:   cfg.BackgroundWorkerConcurrency,
+		DoJobTimeout:  cfg.BackgroundJobTimeout,
+		AddJobTimeout: cfg.BackgroundEnqueueTimeout,
+	})
 }

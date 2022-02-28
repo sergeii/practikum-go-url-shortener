@@ -6,3 +6,4 @@ import (
 
 var ErrURLNotFound = errors.New("URL not found in the storage")
 var ErrURLAlreadyExists = errors.New("URL already exists in the storage")
+var ErrURLIsDeleted = errors.New("URL has been deleted")
